@@ -58,7 +58,10 @@ mod tests;
 
 use std::sync::Arc;
 
-use hir_expand::{ast_id_map::FileAstId, diagnostics::DiagnosticSink, name::Name, MacroDefId};
+use hir_expand::{
+    ast_id_map::FileAstId, diagnostics::DiagnosticSink, name::Name, DeclarativeMacroDefId,
+    MacroDefId,
+};
 use once_cell::sync::Lazy;
 use ra_arena::Arena;
 use ra_db::{CrateId, Edition, FileId};
@@ -145,7 +148,7 @@ pub struct ModuleScope {
     /// Module scoped macros will be inserted into `items` instead of here.
     // FIXME: Macro shadowing in one module is not properly handled. Non-item place macros will
     // be all resolved to the last one defined if shadowing happens.
-    legacy_macros: FxHashMap<Name, MacroDefId>,
+    legacy_macros: FxHashMap<Name, DeclarativeMacroDefId>,
 }
 
 static BUILTIN_SCOPE: Lazy<FxHashMap<Name, Resolution>> = Lazy::new(|| {
@@ -173,7 +176,9 @@ impl ModuleScope {
     }
 
     /// Iterate over all legacy textual scoped macros visable at the end of the module
-    pub fn legacy_macros<'a>(&'a self) -> impl Iterator<Item = (&'a Name, MacroDefId)> + 'a {
+    pub fn legacy_macros<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (&'a Name, DeclarativeMacroDefId)> + 'a {
         self.legacy_macros.iter().map(|(name, def)| (name, *def))
     }
 
@@ -189,7 +194,7 @@ impl ModuleScope {
         })
     }
 
-    fn get_legacy_macro(&self, name: &Name) -> Option<MacroDefId> {
+    fn get_legacy_macro(&self, name: &Name) -> Option<DeclarativeMacroDefId> {
         self.legacy_macros.get(name).copied()
     }
 }

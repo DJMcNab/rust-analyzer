@@ -9,7 +9,7 @@ use crate::{
     db::AstDatabase,
     either::Either,
     name::{AsName, Name},
-    HirFileId, HirFileIdRepr, MacroDefKind,
+    DeclarativeMacroDefKind, HirFileId, HirFileIdRepr, MacroDefId,
 };
 
 #[derive(Debug)]
@@ -24,9 +24,13 @@ impl Hygiene {
             HirFileIdRepr::FileId(_) => None,
             HirFileIdRepr::MacroFile(macro_file) => {
                 let loc = db.lookup_intern_macro(macro_file.macro_call_id);
-                match loc.def.kind {
-                    MacroDefKind::Declarative => Some(loc.def.krate),
-                    MacroDefKind::BuiltIn(_) => None,
+                match loc.def {
+                    MacroDefId::Declarative(it) => match it.kind {
+                        DeclarativeMacroDefKind::Declarative => Some(it.krate),
+                        DeclarativeMacroDefKind::BuiltIn(_) => None,
+                    },
+                    // Procedural macros can't use $crate. TODO: Check this
+                    MacroDefId::Procedural(_) => None,
                 }
             }
         };

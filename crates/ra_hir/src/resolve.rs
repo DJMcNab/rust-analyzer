@@ -15,8 +15,8 @@ use crate::{
     db::{DefDatabase, HirDatabase},
     expr::{ExprScopes, PatId, ScopeId},
     generics::GenericParams,
-    Adt, Const, DefWithBody, Enum, EnumVariant, Function, ImplBlock, Local, MacroDef, ModuleDef,
-    PerNs, Static, Struct, Trait, TypeAlias,
+    Adt, Const, DeclarativeMacroDef, DefWithBody, Enum, EnumVariant, Function, ImplBlock, Local,
+    ModuleDef, PerNs, Static, Struct, Trait, TypeAlias,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -315,7 +315,7 @@ impl Resolver {
         path: &Path,
     ) -> Option<MacroDef> {
         let (item_map, module) = self.module()?;
-        item_map.resolve_path(db, module, path).0.get_macros().map(MacroDef::from)
+        item_map.resolve_path(db, module, path).0.get_macros().map(DeclarativeMacroDef::from)
     }
 
     pub(crate) fn process_all_names(
@@ -410,7 +410,7 @@ impl Resolver {
 /// For IDE only
 pub enum ScopeDef {
     ModuleDef(ModuleDef),
-    MacroDef(MacroDef),
+    MacroDef(DeclarativeMacroDef),
     GenericParam(u32),
     ImplSelfType(ImplBlock),
     AdtSelfType(Adt),

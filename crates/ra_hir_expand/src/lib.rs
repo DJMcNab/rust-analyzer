@@ -79,8 +79,16 @@ impl HirFileId {
                 let loc: MacroCallLoc = db.lookup_intern_macro(macro_file.macro_call_id);
 
                 let arg_start = loc.ast_id.to_node(db).token_tree()?.syntax().text_range().start();
-                let def_start =
-                    loc.def.ast_id.to_node(db).token_tree()?.syntax().text_range().start();
+                let def_start = match loc.def {
+                    MacroDefId::Declarative(it) => (
+                        it.ast_id.file_id,
+                        it.ast_id.to_node(db).token_tree()?.syntax().text_range().start(),
+                    ),
+                    MacroDefId::Procedural(it) => (
+                        it.ast_id.file_id,
+                        it.ast_id.to_node(db).body()?.syntax().text_range().start(),
+                    ),
+                };
 
                 let macro_def = db.macro_def(loc.def)?;
                 let shift = macro_def.0.shift();
@@ -88,7 +96,6 @@ impl HirFileId {
                 let macro_arg = db.macro_arg(macro_file.macro_call_id)?;
 
                 let arg_start = (loc.ast_id.file_id, arg_start);
-                let def_start = (loc.def.ast_id.file_id, def_start);
 
                 Some(ExpansionInfo { arg_start, def_start, macro_arg, macro_def, exp_map, shift })
             }
@@ -120,19 +127,50 @@ impl salsa::InternKey for MacroCallId {
         self.0
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MacroDefId {
-    pub krate: CrateId,
-    pub ast_id: AstId<ast::MacroCall>,
-    pub kind: MacroDefKind,
+
+pub enum MacroDefId {
+    Declarative(DeclarativeMacroDefId),
+    Procedural(ProceduralMacroDefId),
+}
+
+impl From<DeclarativeMacroDefId> for MacroDefId {
+    fn from(it: DeclarativeMacroDefId) -> Self {
+        MacroDefId::Declarative(it)
+    }
+}
+impl From<ProceduralMacroDefId> for MacroDefId {
+    fn from(it: ProceduralMacroDefId) -> Self {
+        MacroDefId::Procedural(it)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MacroDefKind {
+pub struct DeclarativeMacroDefId {
+    pub krate: CrateId,
+    pub ast_id: AstId<ast::MacroCall>,
+    pub kind: DeclarativeMacroDefKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeclarativeMacroDefKind {
     Declarative,
     BuiltIn(BuiltinExpander),
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProceduralMacroDefId {
+    pub krate: CrateId,
+    pub ast_id: AstId<ast::FnDef>,
+    // pub kind: ProceduralMacroDefKind
+}
+
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// pub enum ProceduralMacroDefKind{
+//     Attribute,
+//     FunctionLike,
+//     Derive
+// }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MacroCallLoc {

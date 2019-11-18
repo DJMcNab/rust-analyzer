@@ -2,8 +2,8 @@
 
 use crate::{
     db::{AstDatabase, DefDatabase, HirDatabase},
-    Adt, Const, Enum, EnumVariant, FieldSource, Function, HasSource, MacroDef, Module, Static,
-    Struct, StructField, Trait, TypeAlias, Union,
+    Adt, Const, DeclarativeMacroDef, Enum, EnumVariant, FieldSource, Function, HasSource, Module,
+    Static, Struct, StructField, Trait, TypeAlias, Union,
 };
 use hir_def::attr::Attr;
 use hir_expand::hygiene::Hygiene;
@@ -21,7 +21,7 @@ pub enum AttrDef {
     Const(Const),
     Trait(Trait),
     TypeAlias(TypeAlias),
-    MacroDef(MacroDef),
+    DeclarativeMacroDef(DeclarativeMacroDef),
 }
 
 impl_froms!(
@@ -34,7 +34,7 @@ impl_froms!(
     Function,
     Trait,
     TypeAlias,
-    MacroDef
+    DeclarativeMacroDef
 );
 
 pub trait Attrs {
@@ -70,7 +70,7 @@ pub(crate) fn attributes_query(
         AttrDef::Function(it) => attrs_from_ast(it, db),
         AttrDef::Trait(it) => attrs_from_ast(it, db),
         AttrDef::TypeAlias(it) => attrs_from_ast(it, db),
-        AttrDef::MacroDef(it) => attrs_from_ast(it, db),
+        AttrDef::DeclarativeMacroDef(it) => attrs_from_ast(it, db),
     }
 }
 

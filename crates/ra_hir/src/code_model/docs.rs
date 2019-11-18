@@ -6,8 +6,8 @@ use ra_syntax::ast;
 
 use crate::{
     db::{AstDatabase, DefDatabase, HirDatabase},
-    Adt, Const, Enum, EnumVariant, FieldSource, Function, HasSource, MacroDef, Module, Static,
-    Struct, StructField, Trait, TypeAlias, Union,
+    Adt, Const, DeclarativeMacroDef, Enum, EnumVariant, FieldSource, Function, HasSource, Module,
+    Static, Struct, StructField, Trait, TypeAlias, Union,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -21,7 +21,7 @@ pub enum DocDef {
     Function(Function),
     Trait(Trait),
     TypeAlias(TypeAlias),
-    MacroDef(MacroDef),
+    DeclarativeMacroDef(DeclarativeMacroDef),
 }
 
 impl_froms!(
@@ -34,7 +34,7 @@ impl_froms!(
     Function,
     Trait,
     TypeAlias,
-    MacroDef
+    DeclarativeMacroDef
 );
 
 /// Holds documentation
@@ -86,7 +86,7 @@ pub(crate) fn documentation_query(
         DocDef::Function(it) => docs_from_ast(&it.source(db).ast),
         DocDef::Trait(it) => docs_from_ast(&it.source(db).ast),
         DocDef::TypeAlias(it) => docs_from_ast(&it.source(db).ast),
-        DocDef::MacroDef(it) => docs_from_ast(&it.source(db).ast),
+        DocDef::DeclarativeMacroDef(it) => docs_from_ast(&it.source(db).ast),
     }
 }
 

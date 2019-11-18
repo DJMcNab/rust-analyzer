@@ -225,8 +225,10 @@ impl CrateDefMap {
         //  - current module / scope
         //  - extern prelude
         //  - std prelude
-        let from_legacy_macro =
-            self[module].scope.get_legacy_macro(name).map_or_else(PerNs::none, PerNs::macros);
+        let from_legacy_macro = self[module]
+            .scope
+            .get_legacy_macro(name)
+            .map_or_else(PerNs::none, |it| PerNs::macros(it.into()));
         let from_scope = self[module].scope.get(name).map_or_else(PerNs::none, |res| res.def);
         let from_extern_prelude =
             self.extern_prelude.get(name).map_or(PerNs::none(), |&it| PerNs::types(it));

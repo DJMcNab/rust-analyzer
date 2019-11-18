@@ -2,8 +2,8 @@
 use crate::db::AstDatabase;
 use crate::{
     ast::{self, AstNode},
-    name, AstId, CrateId, HirFileId, MacroCallId, MacroDefId, MacroDefKind, MacroFileKind,
-    TextUnit,
+    name, AstId, CrateId, DeclarativeMacroDefId, DeclarativeMacroDefKind, HirFileId, MacroCallId,
+    MacroFileKind, TextUnit,
 };
 
 use crate::quote;
@@ -30,10 +30,14 @@ pub fn find_builtin_macro(
     ident: &name::Name,
     krate: CrateId,
     ast_id: AstId<ast::MacroCall>,
-) -> Option<MacroDefId> {
+) -> Option<DeclarativeMacroDefId> {
     // FIXME: Better registering method
     if ident == &name::LINE_MACRO {
-        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinExpander::Line) })
+        Some(DeclarativeMacroDefId {
+            krate,
+            ast_id,
+            kind: DeclarativeMacroDefKind::BuiltIn(BuiltinExpander::Line),
+        })
     } else {
         None
     }

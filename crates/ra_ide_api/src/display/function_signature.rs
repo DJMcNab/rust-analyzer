@@ -125,7 +125,7 @@ impl FunctionSignature {
         )
     }
 
-    pub(crate) fn from_macro(db: &db::RootDatabase, macro_def: hir::MacroDef) -> Option<Self> {
+    pub(crate) fn from_macro(db: &db::RootDatabase, macro_def: hir::DeclarativeMacroDef) -> Option<Self> {
         let node: ast::MacroCall = macro_def.source(db).ast;
 
         let params = vec![];

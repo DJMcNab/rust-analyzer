@@ -26,8 +26,8 @@ use crate::{
     expr::{BindingAnnotation, Body, BodySourceMap, ExprValidator, Pat, PatId},
     generics::{GenericDef, HasGenericParams},
     ids::{
-        AstItemDef, ConstId, EnumId, FunctionId, MacroDefId, StaticId, StructId, TraitId,
-        TypeAliasId,
+        AstItemDef, ConstId, DeclarativeMacroDefId, EnumId, FunctionId, StaticId, StructId,
+        TraitId, TypeAliasId,
     },
     resolve::{Resolver, Scope, TypeNs},
     traits::TraitData,
@@ -1011,11 +1011,15 @@ impl TypeAlias {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MacroDef {
-    pub(crate) id: MacroDefId,
+pub struct DeclarativeMacroDef {
+    pub(crate) id: DeclarativeMacroDefId,
 }
 
-impl MacroDef {}
+impl DeclarativeMacroDef {}
+
+pub struct ProceduralMacroDef {
+    pub(crate) id: ProceduralMacroDefId,
+}
 
 pub enum Container {
     Trait(Trait),

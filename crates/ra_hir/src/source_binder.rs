@@ -26,7 +26,7 @@ use crate::{
     resolve::{ScopeDef, TypeNs, ValueNs},
     ty::method_resolution::{self, implements_trait},
     AssocItem, Const, DefWithBody, Either, Enum, FromSource, Function, GenericParam, HasBody,
-    HirFileId, Local, MacroDef, Module, Name, Path, Resolver, Static, Struct, Ty,
+    HirFileId, Local, DeclarativeMacroDef, Module, Name, Path, Resolver, Static, Struct, Ty,
 };
 
 fn try_get_resolver_for_node(db: &impl HirDatabase, node: Source<&SyntaxNode>) -> Option<Resolver> {
@@ -100,7 +100,7 @@ pub enum PathResolution {
     /// A generic parameter
     GenericParam(GenericParam),
     SelfType(crate::ImplBlock),
-    Macro(MacroDef),
+    Macro(DeclarativeMacroDef),
     AssocItem(crate::AssocItem),
 }
 
@@ -223,7 +223,7 @@ impl SourceAnalyzer {
         &self,
         db: &impl HirDatabase,
         macro_call: &ast::MacroCall,
-    ) -> Option<MacroDef> {
+    ) -> Option<DeclarativeMacroDef> {
         // This must be a normal source file rather than macro file.
         let path = macro_call.path().and_then(Path::from_ast)?;
         self.resolver.resolve_path_as_macro(db, &path)

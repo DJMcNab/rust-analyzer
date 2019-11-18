@@ -105,7 +105,7 @@ pub(crate) fn classify_name(
             },
             ast::MacroCall(it) => {
                 let src = hir::Source { file_id, ast: it};
-                let def = hir::MacroDef::from_source(db, src.clone())?;
+                let def = hir::DeclarativeMacroDef::from_source(db, src.clone())?;
 
                 let module_src = ModuleSource::from_child_node(db, src.as_ref().map(|it| it.syntax()));
                 let module = Module::from_definition(db, Source::new(file_id, module_src))?;

@@ -149,7 +149,7 @@ impl CallInfo {
         Some(CallInfo { signature, active_parameter: None })
     }
 
-    fn with_macro(db: &RootDatabase, macro_def: hir::MacroDef) -> Option<Self> {
+    fn with_macro(db: &RootDatabase, macro_def: hir::DeclarativeMacroDef) -> Option<Self> {
         let signature = FunctionSignature::from_macro(db, macro_def)?;
 
         Some(CallInfo { signature, active_parameter: None })

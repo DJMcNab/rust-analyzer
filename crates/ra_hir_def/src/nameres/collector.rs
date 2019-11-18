@@ -3,7 +3,8 @@
 use hir_expand::{
     builtin_macro::find_builtin_macro,
     name::{self, AsName, Name},
-    HirFileId, MacroCallId, MacroCallLoc, MacroDefId, MacroDefKind, MacroFileKind,
+    DeclarativeMacroDefId, DeclarativeMacroDefKind, HirFileId, MacroCallId, MacroCallLoc,
+    MacroDefId, MacroFileKind,
 };
 use ra_cfg::CfgOptions;
 use ra_db::{CrateId, FileId};
@@ -175,7 +176,7 @@ where
         &mut self,
         module_id: CrateModuleId,
         name: Name,
-        macro_: MacroDefId,
+        macro_: DeclarativeMacroDefId,
         export: bool,
     ) {
         // Textual scoping
@@ -188,7 +189,7 @@ where
             self.update(
                 self.def_map.root,
                 None,
-                &[(name, Resolution { def: PerNs::macros(macro_), import: None })],
+                &[(name, Resolution { def: PerNs::macros(macro_.into()), import: None })],
             );
         }
     }
@@ -200,7 +201,12 @@ where
     /// the definition of current module.
     /// And also, `macro_use` on a module will import all legacy macros visable inside to
     /// current legacy scope, with possible shadowing.
-    fn define_legacy_macro(&mut self, module_id: CrateModuleId, name: Name, macro_: MacroDefId) {
+    fn define_legacy_macro(
+        &mut self,
+        module_id: CrateModuleId,
+        name: Name,
+        macro_: DeclarativeMacroDefId,
+    ) {
         // Always shadowing
         self.def_map.modules[module_id].scope.legacy_macros.insert(name, macro_);
     }
@@ -238,8 +244,14 @@ where
     fn import_all_macros_exported(&mut self, current_module_id: CrateModuleId, krate: CrateId) {
         let def_map = self.db.crate_def_map(krate);
         for (name, def) in def_map[def_map.root].scope.macros() {
-            // `macro_use` only bring things into legacy scope.
-            self.define_legacy_macro(current_module_id, name.clone(), def);
+            match def {
+                MacroDefId::Declarative(def) => {
+                    // TODO: What does macro_use do for declarative macros.
+                    // `macro_use` only bring things into legacy scope.
+                    self.define_legacy_macro(current_module_id, name.clone(), def);
+                }
+                MacroDefId::Procedural(_) => (),
+            }
         }
     }
 
@@ -722,10 +734,10 @@ where
         // Case 1: macro rules, define a macro in crate-global mutable scope
         if is_macro_rules(&mac.path) {
             if let Some(name) = &mac.name {
-                let macro_id = MacroDefId {
+                let macro_id = DeclarativeMacroDefId {
                     ast_id,
                     krate: self.def_collector.def_map.krate,
-                    kind: MacroDefKind::Declarative,
+                    kind: DeclarativeMacroDefKind::Declarative,
                 };
                 self.def_collector.define_macro(self.module_id, name.clone(), macro_id, mac.export);
             }
@@ -738,9 +750,13 @@ where
             self.def_collector.def_map[self.module_id].scope.get_legacy_macro(&name)
         }) {
             let macro_call_id =
-                self.def_collector.db.intern_macro(MacroCallLoc { def: macro_def, ast_id });
+                self.def_collector.db.intern_macro(MacroCallLoc { def: macro_def.into(), ast_id });
 
-            self.def_collector.collect_macro_expansion(self.module_id, macro_call_id, macro_def);
+            self.def_collector.collect_macro_expansion(
+                self.module_id,
+                macro_call_id,
+                macro_def.into(),
+            );
             return;
         }
 

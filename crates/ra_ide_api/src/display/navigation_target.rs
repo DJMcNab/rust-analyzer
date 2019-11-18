@@ -306,7 +306,7 @@ impl ToNav for hir::StructField {
     }
 }
 
-impl ToNav for hir::MacroDef {
+impl ToNav for hir::DeclarativeMacroDef {
     fn to_nav(&self, db: &RootDatabase) -> NavigationTarget {
         let src = self.source(db);
         log::debug!("nav target {:#?}", src.ast.syntax());

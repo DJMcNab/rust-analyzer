@@ -162,7 +162,7 @@ impl Completions {
         &mut self,
         ctx: &CompletionContext,
         name: Option<String>,
-        macro_: hir::MacroDef,
+        macro_: hir::DeclarativeMacroDef,
     ) {
         let name = match name {
             Some(it) => it,

@@ -28,7 +28,7 @@ from_id![
     (hir_def::ConstId, crate::Const),
     (hir_def::FunctionId, crate::Function),
     (hir_def::ImplId, crate::ImplBlock),
-    (hir_expand::MacroDefId, crate::MacroDef)
+    (hir_expand::DeclarativeMacroDefId, crate::DeclarativeMacroDef)
 ];
 
 impl From<AdtId> for Adt {

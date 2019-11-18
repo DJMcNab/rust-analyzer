@@ -4,7 +4,7 @@
 //! Note that the reference search is possible for not all of the classified items.
 
 use hir::{
-    Adt, AssocItem, GenericParam, HasSource, Local, MacroDef, Module, ModuleDef, StructField, Ty,
+    Adt, AssocItem, GenericParam, HasSource, Local, DeclarativeMacroDef, Module, ModuleDef, StructField, Ty,
     VariantDef,
 };
 use ra_syntax::{ast, ast::VisibilityOwner};
@@ -13,7 +13,7 @@ use crate::db::RootDatabase;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NameKind {
-    Macro(MacroDef),
+    Macro(DeclarativeMacroDef),
     Field(StructField),
     AssocItem(AssocItem),
     Def(ModuleDef),

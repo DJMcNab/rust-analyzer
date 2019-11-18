@@ -11,7 +11,10 @@ pub use hir_def::{
     AstItemDef, ConstId, EnumId, FunctionId, ItemLoc, LocationCtx, StaticId, StructId, TraitId,
     TypeAliasId,
 };
-pub use hir_expand::{HirFileId, MacroCallId, MacroCallLoc, MacroDefId, MacroFile, MacroFileKind};
+pub use hir_expand::{
+    DeclarativeMacroDefId, HirFileId, MacroCallId, MacroCallLoc, MacroDefId, MacroFile,
+    MacroFileKind, ProceduralMacroDefId,
+};
 
 macro_rules! impl_intern_key {
     ($name:ident) => {

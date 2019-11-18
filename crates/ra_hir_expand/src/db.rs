@@ -9,8 +9,8 @@ use ra_prof::profile;
 use ra_syntax::{AstNode, Parse, SyntaxNode};
 
 use crate::{
-    ast_id_map::AstIdMap, BuiltinExpander, HirFileId, HirFileIdRepr, MacroCallId, MacroCallLoc,
-    MacroDefId, MacroDefKind, MacroFile, MacroFileKind,
+    ast_id_map::AstIdMap, BuiltinExpander, DeclarativeMacroDefKind, HirFileId, HirFileIdRepr,
+    MacroCallId, MacroCallLoc, MacroDefId, MacroFile, MacroFileKind,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -69,23 +69,26 @@ pub(crate) fn macro_def(
     db: &dyn AstDatabase,
     id: MacroDefId,
 ) -> Option<Arc<(TokenExpander, mbe::TokenMap)>> {
-    match id.kind {
-        MacroDefKind::Declarative => {
-            let macro_call = id.ast_id.to_node(db);
-            let arg = macro_call.token_tree()?;
-            let (tt, tmap) = mbe::ast_to_token_tree(&arg).or_else(|| {
-                log::warn!("fail on macro_def to token tree: {:#?}", arg);
-                None
-            })?;
-            let rules = MacroRules::parse(&tt).ok().or_else(|| {
-                log::warn!("fail on macro_def parse: {:#?}", tt);
-                None
-            })?;
-            Some(Arc::new((TokenExpander::MacroRules(rules), tmap)))
-        }
-        MacroDefKind::BuiltIn(expander) => {
-            Some(Arc::new((TokenExpander::Builtin(expander.clone()), mbe::TokenMap::default())))
-        }
+    match id {
+        MacroDefId::Declarative(decl) => match decl.kind {
+            DeclarativeMacroDefKind::Declarative => {
+                let macro_call = decl.ast_id.to_node(db);
+                let arg = macro_call.token_tree()?;
+                let (tt, tmap) = mbe::ast_to_token_tree(&arg).or_else(|| {
+                    log::warn!("fail on macro_def to token tree: {:#?}", arg);
+                    None
+                })?;
+                let rules = MacroRules::parse(&tt).ok().or_else(|| {
+                    log::warn!("fail on macro_def parse: {:#?}", tt);
+                    None
+                })?;
+                Some(Arc::new((TokenExpander::MacroRules(rules), tmap)))
+            }
+            DeclarativeMacroDefKind::BuiltIn(expander) => {
+                Some(Arc::new((TokenExpander::Builtin(expander.clone()), mbe::TokenMap::default())))
+            }
+        },
+        MacroDefId::Procedural(_) => unimplemented!(),
     }
 }
 
