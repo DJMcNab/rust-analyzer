@@ -3,7 +3,8 @@
 use hir_expand::{
     builtin_macro::find_builtin_macro,
     name::{self, AsName, Name},
-    HirFileId, MacroCallId, MacroCallLoc, MacroDefId, MacroDefKind, MacroFileKind,
+    AttributeMacroSource, FnLikeMacroSource, HirFileId, MacroCallId, MacroCallLoc, MacroDefId,
+    MacroDefKind, MacroFileKind,
 };
 use ra_cfg::CfgOptions;
 use ra_db::{CrateId, FileId};
@@ -723,9 +724,8 @@ where
         if is_macro_rules(&mac.path) {
             if let Some(name) = &mac.name {
                 let macro_id = MacroDefId {
-                    ast_id,
                     krate: self.def_collector.def_map.krate,
-                    kind: MacroDefKind::Declarative,
+                    kind: MacroDefKind::FnLike(FnLikeMacroSource::Declarative(ast_id)),
                 };
                 self.def_collector.define_macro(self.module_id, name.clone(), macro_id, mac.export);
             }

@@ -2,18 +2,33 @@
 use crate::db::AstDatabase;
 use crate::{
     ast::{self, AstNode},
-    name, AstId, CrateId, HirFileId, MacroCallId, MacroDefId, MacroDefKind, MacroFileKind,
-    TextUnit,
+    name, AstId, CrateId, FnLikeMacroSource, HirFileId, MacroCallId, MacroDefId, MacroDefKind,
+    MacroFileKind, TextUnit,
 };
 
 use crate::quote;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BuiltinExpander {
+#[rustfmt::skip] // For some reason the bottom two comments are indented by rustdoc?
+pub enum BuiltinAttributeExpander {
+    // E.g. #[bench/test] maybe
+    // See https://doc.rust-lang.org/src/core/macros.rs.html#1236
+    // We should support this
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuiltinDeriveExpander {
+    // E.g. Copy, Eq, Hash, PartialEq
+    // See https://doc.rust-lang.org/src/core/clone.rs.html#141 - we need to parse macros 2.0 to get proper docs for this for free
+    Clone,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuiltinFnLikeExpander {
     Line,
 }
 
-impl BuiltinExpander {
+impl BuiltinFnLikeExpander {
     pub fn expand(
         &self,
         db: &dyn AstDatabase,
@@ -21,7 +36,7 @@ impl BuiltinExpander {
         tt: &tt::Subtree,
     ) -> Result<tt::Subtree, mbe::ExpandError> {
         match self {
-            BuiltinExpander::Line => line_expand(db, id, tt),
+            BuiltinFnLikeExpander::Line => line_expand(db, id, tt),
         }
     }
 }
@@ -33,7 +48,13 @@ pub fn find_builtin_macro(
 ) -> Option<MacroDefId> {
     // FIXME: Better registering method
     if ident == &name::LINE_MACRO {
-        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinExpander::Line) })
+        Some(MacroDefId {
+            krate,
+            kind: MacroDefKind::FnLike(FnLikeMacroSource::Builtin(
+                ast_id,
+                BuiltinFnLikeExpander::Line,
+            )),
+        })
     } else {
         None
     }

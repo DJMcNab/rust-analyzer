@@ -99,7 +99,7 @@ pub(crate) fn classify_name(db: &RootDatabase, name: Source<&ast::Name>) -> Opti
             },
             ast::MacroCall(it) => {
                 let src = name.with_ast(it);
-                let def = hir::MacroDef::from_source(db, src.clone())?;
+                let def = hir::MacroDef::from_source(db, src.clone().map(Into::into))?;
 
                 let module_src = ModuleSource::from_child_node(db, src.as_ref().map(|it| it.syntax()));
                 let module = Module::from_definition(db, src.with_ast(module_src))?;

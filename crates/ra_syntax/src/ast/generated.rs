@@ -1615,6 +1615,47 @@ impl MacroCall {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MacroDef {
+    MacroCall(MacroCall),
+    FnDef(FnDef),
+}
+impl From<MacroCall> for MacroDef {
+    fn from(node: MacroCall) -> MacroDef {
+        MacroDef::MacroCall(node)
+    }
+}
+impl From<FnDef> for MacroDef {
+    fn from(node: FnDef) -> MacroDef {
+        MacroDef::FnDef(node)
+    }
+}
+impl AstNode for MacroDef {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        match kind {
+            MACRO_CALL | FN_DEF => true,
+            _ => false,
+        }
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        let res = match syntax.kind() {
+            MACRO_CALL => MacroDef::MacroCall(MacroCall { syntax }),
+            FN_DEF => MacroDef::FnDef(FnDef { syntax }),
+            _ => return None,
+        };
+        Some(res)
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        match self {
+            MacroDef::MacroCall(it) => &it.syntax,
+            MacroDef::FnDef(it) => &it.syntax,
+        }
+    }
+}
+impl ast::AttrsOwner for MacroDef {}
+impl ast::NameOwner for MacroDef {}
+impl ast::DocCommentsOwner for MacroDef {}
+impl MacroDef {}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MacroItems {
     pub(crate) syntax: SyntaxNode,
 }

@@ -404,6 +404,10 @@ Grammar(
             enum: ["FnDef", "TypeAliasDef", "ConstDef"],
             traits: ["AttrsOwner"]
         ),
+        "MacroDef": (
+            enum: ["MacroCall", "FnDef"],
+            traits: ["AttrsOwner", "NameOwner", "DocCommentsOwner"]
+        ),
 
         "TupleExpr": (
             collections: [("exprs", "Expr")]

@@ -19,12 +19,14 @@ use std::sync::Arc;
 use ra_db::{salsa, CrateId, FileId};
 use ra_syntax::{
     algo,
-    ast::{self, AstNode},
+    ast::{self, AstNode, MacroDef},
     SyntaxNode, SyntaxToken, TextUnit,
 };
 
 use crate::ast_id_map::FileAstId;
-use crate::builtin_macro::BuiltinExpander;
+use crate::builtin_macro::{
+    BuiltinAttributeExpander, BuiltinDeriveExpander, BuiltinFnLikeExpander,
+};
 
 /// Input to the analyzer is a set of files, where each file is identified by
 /// `FileId` and contains source code. However, another source of source code in
@@ -80,7 +82,10 @@ impl HirFileId {
                 let loc: MacroCallLoc = db.lookup_intern_macro(macro_file.macro_call_id);
 
                 let arg_tt = loc.ast_id.to_node(db).token_tree()?;
-                let def_tt = loc.def.ast_id.to_node(db).token_tree()?;
+                let def_tt = match loc.def.ast_id(db).to_node(db) {
+                    MacroDef::MacroCall(call) => call.token_tree()?,
+                    MacroDef::FnDef(_) => return None,
+                };
 
                 let macro_def = db.macro_def(loc.def)?;
                 let (parse, exp_map) = db.parse_macro(macro_file)?;
@@ -127,14 +132,51 @@ impl salsa::InternKey for MacroCallId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MacroDefId {
     pub krate: CrateId,
-    pub ast_id: AstId<ast::MacroCall>,
     pub kind: MacroDefKind,
+}
+
+impl MacroDefId {
+    pub fn ast_id(self, db: &dyn crate::db::AstDatabase) -> AstId<ast::MacroDef> {
+        match self.kind {
+            MacroDefKind::FnLike(FnLikeMacroSource::Builtin(id, _))
+            | MacroDefKind::FnLike(FnLikeMacroSource::Declarative(id)) => {
+                AstId::new(id.file_id, db.ast_id_map(id.file_id).ast_id(&id.to_node(db).into()))
+            }
+            // This match arm is seperate even though the types are the same as for the first match arm
+            // because eventually these will use macros 2.0 macros
+            MacroDefKind::Attribute(AttributeMacroSource::Builtin(id, _))
+            | MacroDefKind::Derive(AttributeMacroSource::Builtin(id, _)) => {
+                AstId::new(id.file_id, db.ast_id_map(id.file_id).ast_id(&id.to_node(db).into()))
+            }
+            MacroDefKind::Derive(AttributeMacroSource::Procedural(id))
+            | MacroDefKind::Attribute(AttributeMacroSource::Procedural(id))
+            | MacroDefKind::FnLike(FnLikeMacroSource::Procedural(id)) => {
+                AstId::new(id.file_id, db.ast_id_map(id.file_id).ast_id(&id.to_node(db).into()))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+
+pub enum AttributeMacroSource<B> {
+    // N.B. this should be a macros 2.0 macro
+    Builtin(AstId<ast::MacroCall>, B),
+    Procedural(AstId<ast::FnDef>),
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+
+pub enum FnLikeMacroSource {
+    Builtin(AstId<ast::MacroCall>, BuiltinFnLikeExpander),
+    Declarative(AstId<ast::MacroCall>),
+    Procedural(AstId<ast::FnDef>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MacroDefKind {
-    Declarative,
-    BuiltIn(BuiltinExpander),
+    Attribute(AttributeMacroSource<BuiltinAttributeExpander>),
+    Derive(AttributeMacroSource<BuiltinDeriveExpander>),
+    FnLike(FnLikeMacroSource),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

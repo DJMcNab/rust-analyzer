@@ -9,14 +9,14 @@ use ra_prof::profile;
 use ra_syntax::{AstNode, Parse, SyntaxNode};
 
 use crate::{
-    ast_id_map::AstIdMap, BuiltinExpander, HirFileId, HirFileIdRepr, MacroCallId, MacroCallLoc,
-    MacroDefId, MacroDefKind, MacroFile, MacroFileKind,
+    ast_id_map::AstIdMap, BuiltinFnLikeExpander, FnLikeMacroSource, HirFileId, HirFileIdRepr,
+    MacroCallId, MacroCallLoc, MacroDefId, MacroDefKind, MacroFile, MacroFileKind,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TokenExpander {
     MacroRules(mbe::MacroRules),
-    Builtin(BuiltinExpander),
+    Builtin(BuiltinFnLikeExpander),
 }
 
 impl TokenExpander {
@@ -75,22 +75,26 @@ pub(crate) fn macro_def(
     id: MacroDefId,
 ) -> Option<Arc<(TokenExpander, mbe::TokenMap)>> {
     match id.kind {
-        MacroDefKind::Declarative => {
-            let macro_call = id.ast_id.to_node(db);
-            let arg = macro_call.token_tree()?;
-            let (tt, tmap) = mbe::ast_to_token_tree(&arg).or_else(|| {
-                log::warn!("fail on macro_def to token tree: {:#?}", arg);
-                None
-            })?;
-            let rules = MacroRules::parse(&tt).ok().or_else(|| {
-                log::warn!("fail on macro_def parse: {:#?}", tt);
-                None
-            })?;
-            Some(Arc::new((TokenExpander::MacroRules(rules), tmap)))
-        }
-        MacroDefKind::BuiltIn(expander) => {
-            Some(Arc::new((TokenExpander::Builtin(expander.clone()), mbe::TokenMap::default())))
-        }
+        MacroDefKind::Attribute(_) => None,
+        MacroDefKind::Derive(_) => None,
+        MacroDefKind::FnLike(source) => match source {
+            FnLikeMacroSource::Declarative(macro_call) => {
+                let arg = macro_call.to_node(db).token_tree()?;
+                let (tt, tmap) = mbe::ast_to_token_tree(&arg).or_else(|| {
+                    log::warn!("fail on macro_def to token tree: {:#?}", arg);
+                    None
+                })?;
+                let rules = MacroRules::parse(&tt).ok().or_else(|| {
+                    log::warn!("fail on macro_def parse: {:#?}", tt);
+                    None
+                })?;
+                Some(Arc::new((TokenExpander::MacroRules(rules), tmap)))
+            }
+            FnLikeMacroSource::Builtin(_, expander) => {
+                Some(Arc::new((TokenExpander::Builtin(expander.clone()), mbe::TokenMap::default())))
+            }
+            FnLikeMacroSource::Procedural(_) => None,
+        },
     }
 }
 

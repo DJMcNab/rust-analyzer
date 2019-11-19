@@ -9,7 +9,7 @@ use crate::{
     db::AstDatabase,
     either::Either,
     name::{AsName, Name},
-    HirFileId, HirFileIdRepr, MacroDefKind,
+    FnLikeMacroSource, HirFileId, HirFileIdRepr, MacroDefKind,
 };
 
 #[derive(Debug)]
@@ -25,8 +25,8 @@ impl Hygiene {
             HirFileIdRepr::MacroFile(macro_file) => {
                 let loc = db.lookup_intern_macro(macro_file.macro_call_id);
                 match loc.def.kind {
-                    MacroDefKind::Declarative => Some(loc.def.krate),
-                    MacroDefKind::BuiltIn(_) => None,
+                    MacroDefKind::FnLike(FnLikeMacroSource::Declarative(_)) => Some(loc.def.krate),
+                    _ => None,
                 }
             }
         };

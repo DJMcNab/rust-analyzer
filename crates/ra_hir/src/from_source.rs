@@ -1,7 +1,7 @@
 //! FIXME: write short doc here
 
 use hir_def::{ModuleId, StructId, StructOrUnionId, UnionId};
-use hir_expand::{name::AsName, AstId, MacroDefId, MacroDefKind};
+use hir_expand::{name::AsName, AstId, FnLikeMacroSource, MacroDefId, MacroDefKind};
 use ra_syntax::{
     ast::{self, AstNode, NameOwner},
     match_ast,
@@ -79,17 +79,23 @@ impl FromSource for TypeAlias {
 }
 
 impl FromSource for MacroDef {
-    type Ast = ast::MacroCall;
+    type Ast = ast::MacroDef;
     fn from_source(db: &(impl DefDatabase + AstDatabase), src: Source<Self::Ast>) -> Option<Self> {
-        let kind = MacroDefKind::Declarative;
-
         let module_src = ModuleSource::from_child_node(db, src.as_ref().map(|it| it.syntax()));
         let module = Module::from_definition(db, Source::new(src.file_id, module_src))?;
         let krate = module.krate().crate_id();
 
-        let ast_id = AstId::new(src.file_id, db.ast_id_map(src.file_id).ast_id(&src.ast));
-
-        let id: MacroDefId = MacroDefId { krate, ast_id, kind };
+        let kind = match src.ast {
+            // FIXME: Handle builtin macros and properly handle procedural macros
+            // See https://github.com/rust-analyzer/rust-analyzer/issues/2258
+            ast::MacroDef::MacroCall(it) => MacroDefKind::FnLike(FnLikeMacroSource::Declarative(
+                AstId::new(src.file_id, db.ast_id_map(src.file_id).ast_id(&it)),
+            )),
+            ast::MacroDef::FnDef(it) => MacroDefKind::FnLike(FnLikeMacroSource::Procedural(
+                AstId::new(src.file_id, db.ast_id_map(src.file_id).ast_id(&it)),
+            )),
+        };
+        let id: MacroDefId = MacroDefId { krate, kind };
         Some(MacroDef { id })
     }
 }

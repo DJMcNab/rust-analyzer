@@ -61,7 +61,9 @@ pub(crate) fn where_predicates<N: TypeParamsOwner>(node: &N) -> Vec<String> {
     res
 }
 
-pub(crate) fn macro_label(node: &ast::MacroCall) -> String {
+pub(crate) fn macro_label(node: &ast::MacroDef) -> String {
+    // FIXME: Update this to take into account procedural macros
+    // At the moment I think the result is `macro_rules! macro_name`
     let name = node.name().map(|name| name.syntax().text().to_string()).unwrap_or_default();
     let vis = if node.has_atom_attr("macro_export") { "#[macro_export]\n" } else { "" };
     format!("{}macro_rules! {}", vis, name)
