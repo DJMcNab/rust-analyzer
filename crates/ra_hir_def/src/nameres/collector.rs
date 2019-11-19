@@ -3,8 +3,8 @@
 use hir_expand::{
     builtin_macro::find_builtin_macro,
     name::{self, AsName, Name},
-    AttributeMacroSource, FnLikeMacroSource, HirFileId, MacroCallId, MacroCallLoc, MacroDefId,
-    MacroDefKind, MacroFileKind,
+    FnLikeMacroSource, HirFileId, MacroCallId, MacroCallLoc, MacroDefId, MacroDefKind,
+    MacroFileKind,
 };
 use ra_cfg::CfgOptions;
 use ra_db::{CrateId, FileId};
