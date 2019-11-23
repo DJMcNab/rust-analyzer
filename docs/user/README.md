@@ -127,10 +127,15 @@ Installation:
 [ra-emacs-lsp.el](https://github.com/rust-analyzer/rust-analyzer/blob/69ee5c9c5ef212f7911028c9ddf581559e6565c3/editors/emacs/ra-emacs-lsp.el)
 to load path and require it in `init.el`
 * run `lsp` in a rust buffer
-* (Optionally) bind commands like `rust-analyzer-join-lines` or `rust-analyzer-extend-selection` to keys, and enable `rust-analyzer-inlay-hints-mode` to get inline type hints
+* (Optionally) bind commands like `rust-analyzer-join-lines`, `rust-analyzer-extend-selection` and `rust-analyzer-expand-macro` to keys, and enable `rust-analyzer-inlay-hints-mode` to get inline type hints
 
 
 ## Vim and NeoVim
+
+Neovim 0.5 has a built in language server. For a quick start configuration of
+rust-analyzer, use [neovim/nvim-lsp](https://github.com/neovim/nvim-lsp#rust_analyzer).
+Once `neovim/nvim-lsp` is installed, you can use `call nvim_lsp#setup("rust_analyzer", {})`
+or `lua require'nvim_lsp'.rust_analyzer.setup({})` to quickly get set up.
 
 * Install coc.nvim by following the instructions at [coc.nvim]
   - You will need nodejs installed.

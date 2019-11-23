@@ -13,16 +13,16 @@ use rustc_hash::FxHashMap;
 use test_utils::tested_by;
 
 use crate::{
-    attr::Attr,
+    attr::Attrs,
     db::DefDatabase2,
     nameres::{
         diagnostics::DefDiagnostic, mod_resolution::ModDir, path_resolution::ReachedFixedPoint,
         per_ns::PerNs, raw, CrateDefMap, ModuleData, Resolution, ResolveMode,
     },
     path::{Path, PathKind},
-    AdtId, AstId, AstItemDef, ConstId, CrateModuleId, EnumId, EnumVariantId, FunctionId, ImplId,
-    LocationCtx, ModuleDefId, ModuleId, StaticId, StructId, StructOrUnionId, TraitId, TypeAliasId,
-    UnionId,
+    AdtId, AstId, AstItemDef, ConstLoc, ContainerId, CrateModuleId, EnumId, EnumVariantId,
+    FunctionLoc, ImplId, Intern, LocationCtx, ModuleDefId, ModuleId, StaticId, StructId,
+    StructOrUnionId, TraitId, TypeAliasLoc, UnionId,
 };
 
 pub(super) fn collect_defs(db: &impl DefDatabase2, mut def_map: CrateDefMap) -> CrateDefMap {
@@ -550,7 +550,7 @@ where
         // `#[macro_use] extern crate` is hoisted to imports macros before collecting
         // any other items.
         for item in items {
-            if self.is_cfg_enabled(item.attrs()) {
+            if self.is_cfg_enabled(&item.attrs) {
                 if let raw::RawItemKind::Import(import_id) = item.kind {
                     let import = self.raw_items[import_id].clone();
                     if import.is_extern_crate && import.is_macro_use {
@@ -561,10 +561,10 @@ where
         }
 
         for item in items {
-            if self.is_cfg_enabled(item.attrs()) {
+            if self.is_cfg_enabled(&item.attrs) {
                 match item.kind {
                     raw::RawItemKind::Module(m) => {
-                        self.collect_module(&self.raw_items[m], item.attrs())
+                        self.collect_module(&self.raw_items[m], &item.attrs)
                     }
                     raw::RawItemKind::Import(import_id) => self
                         .def_collector
@@ -586,9 +586,9 @@ where
         }
     }
 
-    fn collect_module(&mut self, module: &raw::ModuleData, attrs: &[Attr]) {
+    fn collect_module(&mut self, module: &raw::ModuleData, attrs: &Attrs) {
         let path_attr = self.path_attr(attrs);
-        let is_macro_use = self.is_macro_use(attrs);
+        let is_macro_use = attrs.has_atom("macro_use");
         match module {
             // inline module, just recurse
             raw::ModuleData::Definition { name, items, ast_id } => {
@@ -674,8 +674,13 @@ where
         let name = def.name.clone();
         let def: PerNs = match def.kind {
             raw::DefKind::Function(ast_id) => {
-                let f = FunctionId::from_ast_id(ctx, ast_id);
-                PerNs::values(f.into())
+                let def = FunctionLoc {
+                    container: ContainerId::ModuleId(module),
+                    ast_id: AstId::new(self.file_id, ast_id),
+                }
+                .intern(self.def_collector.db);
+
+                PerNs::values(def.into())
             }
             raw::DefKind::Struct(ast_id) => {
                 let id = StructOrUnionId::from_ast_id(ctx, ast_id).into();
@@ -688,13 +693,27 @@ where
                 PerNs::both(u, u)
             }
             raw::DefKind::Enum(ast_id) => PerNs::types(EnumId::from_ast_id(ctx, ast_id).into()),
-            raw::DefKind::Const(ast_id) => PerNs::values(ConstId::from_ast_id(ctx, ast_id).into()),
+            raw::DefKind::Const(ast_id) => {
+                let def = ConstLoc {
+                    container: ContainerId::ModuleId(module),
+                    ast_id: AstId::new(self.file_id, ast_id),
+                }
+                .intern(self.def_collector.db);
+
+                PerNs::values(def.into())
+            }
             raw::DefKind::Static(ast_id) => {
                 PerNs::values(StaticId::from_ast_id(ctx, ast_id).into())
             }
             raw::DefKind::Trait(ast_id) => PerNs::types(TraitId::from_ast_id(ctx, ast_id).into()),
             raw::DefKind::TypeAlias(ast_id) => {
-                PerNs::types(TypeAliasId::from_ast_id(ctx, ast_id).into())
+                let def = TypeAliasLoc {
+                    container: ContainerId::ModuleId(module),
+                    ast_id: AstId::new(self.file_id, ast_id),
+                }
+                .intern(self.def_collector.db);
+
+                PerNs::types(def.into())
             }
         };
         let resolution = Resolution { def, import: None };
@@ -760,16 +779,12 @@ where
         }
     }
 
-    fn is_cfg_enabled(&self, attrs: &[Attr]) -> bool {
+    fn is_cfg_enabled(&self, attrs: &Attrs) -> bool {
         attrs.iter().all(|attr| attr.is_cfg_enabled(&self.def_collector.cfg_options) != Some(false))
     }
 
-    fn path_attr<'a>(&self, attrs: &'a [Attr]) -> Option<&'a SmolStr> {
+    fn path_attr<'a>(&self, attrs: &'a Attrs) -> Option<&'a SmolStr> {
         attrs.iter().find_map(|attr| attr.as_path())
-    }
-
-    fn is_macro_use<'a>(&self, attrs: &'a [Attr]) -> bool {
-        attrs.iter().any(|attr| attr.is_simple_atom("macro_use"))
     }
 }
 

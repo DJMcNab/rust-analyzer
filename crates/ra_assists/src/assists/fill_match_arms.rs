@@ -84,7 +84,7 @@ fn resolve_enum_def(
     let expr_ty = analyzer.type_of(db, &expr)?;
 
     analyzer.autoderef(db, expr_ty).find_map(|ty| match ty.as_adt() {
-        Some((Adt::Enum(e), _)) => Some(e.source(db).ast),
+        Some((Adt::Enum(e), _)) => Some(e.source(db).value),
         _ => None,
     })
 }
@@ -101,7 +101,7 @@ fn build_pat(var: ast::EnumVariant) -> Option<ast::Pat> {
                 iter::repeat(make::placeholder_pat().into()).take(field_list.fields().count());
             make::tuple_struct_pat(path, pats).into()
         }
-        ast::StructKind::Named(field_list) => {
+        ast::StructKind::Record(field_list) => {
             let pats = field_list.fields().map(|f| make::bind_pat(f.name().unwrap()).into());
             make::record_pat(path, pats).into()
         }

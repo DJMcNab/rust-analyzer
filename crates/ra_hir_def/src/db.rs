@@ -3,35 +3,39 @@ use std::sync::Arc;
 
 use hir_expand::{db::AstDatabase, HirFileId};
 use ra_db::{salsa, CrateId, SourceDatabase};
-use ra_syntax::ast;
+use ra_syntax::{ast, SmolStr};
 
 use crate::{
     adt::{EnumData, StructData},
+    attr::Attrs,
     body::{scope::ExprScopes, Body, BodySourceMap},
-    imp::ImplData,
+    data::{ConstData, FunctionData, ImplData, TraitData, TypeAliasData},
+    generics::GenericParams,
+    lang_item::{LangItemTarget, LangItems},
     nameres::{
         raw::{ImportSourceMap, RawItems},
         CrateDefMap,
     },
-    DefWithBodyId, EnumId, ImplId, ItemLoc, StructOrUnionId,
+    AttrDefId, ConstId, DefWithBodyId, EnumId, FunctionId, GenericDefId, ImplId, ItemLoc, ModuleId,
+    StaticId, StructOrUnionId, TraitId, TypeAliasId,
 };
 
 #[salsa::query_group(InternDatabaseStorage)]
 pub trait InternDatabase: SourceDatabase {
     #[salsa::interned]
-    fn intern_function(&self, loc: ItemLoc<ast::FnDef>) -> crate::FunctionId;
+    fn intern_function(&self, loc: crate::FunctionLoc) -> crate::FunctionId;
     #[salsa::interned]
     fn intern_struct_or_union(&self, loc: ItemLoc<ast::StructDef>) -> crate::StructOrUnionId;
     #[salsa::interned]
     fn intern_enum(&self, loc: ItemLoc<ast::EnumDef>) -> crate::EnumId;
     #[salsa::interned]
-    fn intern_const(&self, loc: ItemLoc<ast::ConstDef>) -> crate::ConstId;
+    fn intern_const(&self, loc: crate::ConstLoc) -> crate::ConstId;
     #[salsa::interned]
     fn intern_static(&self, loc: ItemLoc<ast::StaticDef>) -> crate::StaticId;
     #[salsa::interned]
     fn intern_trait(&self, loc: ItemLoc<ast::TraitDef>) -> crate::TraitId;
     #[salsa::interned]
-    fn intern_type_alias(&self, loc: ItemLoc<ast::TypeAliasDef>) -> crate::TypeAliasId;
+    fn intern_type_alias(&self, loc: crate::TypeAliasLoc) -> crate::TypeAliasId;
     #[salsa::interned]
     fn intern_impl(&self, loc: ItemLoc<ast::ImplBlock>) -> crate::ImplId;
 }
@@ -59,6 +63,21 @@ pub trait DefDatabase2: InternDatabase + AstDatabase {
     #[salsa::invoke(ImplData::impl_data_query)]
     fn impl_data(&self, e: ImplId) -> Arc<ImplData>;
 
+    #[salsa::invoke(TraitData::trait_data_query)]
+    fn trait_data(&self, e: TraitId) -> Arc<TraitData>;
+
+    #[salsa::invoke(TypeAliasData::type_alias_data_query)]
+    fn type_alias_data(&self, e: TypeAliasId) -> Arc<TypeAliasData>;
+
+    #[salsa::invoke(FunctionData::fn_data_query)]
+    fn function_data(&self, func: FunctionId) -> Arc<FunctionData>;
+
+    #[salsa::invoke(ConstData::const_data_query)]
+    fn const_data(&self, konst: ConstId) -> Arc<ConstData>;
+
+    #[salsa::invoke(ConstData::static_data_query)]
+    fn static_data(&self, konst: StaticId) -> Arc<ConstData>;
+
     #[salsa::invoke(Body::body_with_source_map_query)]
     fn body_with_source_map(&self, def: DefWithBodyId) -> (Arc<Body>, Arc<BodySourceMap>);
 
@@ -67,4 +86,19 @@ pub trait DefDatabase2: InternDatabase + AstDatabase {
 
     #[salsa::invoke(ExprScopes::expr_scopes_query)]
     fn expr_scopes(&self, def: DefWithBodyId) -> Arc<ExprScopes>;
+
+    #[salsa::invoke(GenericParams::generic_params_query)]
+    fn generic_params(&self, def: GenericDefId) -> Arc<GenericParams>;
+
+    #[salsa::invoke(Attrs::attrs_query)]
+    fn attrs(&self, def: AttrDefId) -> Attrs;
+
+    #[salsa::invoke(LangItems::module_lang_items_query)]
+    fn module_lang_items(&self, module: ModuleId) -> Option<Arc<LangItems>>;
+
+    #[salsa::invoke(LangItems::crate_lang_items_query)]
+    fn crate_lang_items(&self, krate: CrateId) -> Arc<LangItems>;
+
+    #[salsa::invoke(LangItems::lang_item_query)]
+    fn lang_item(&self, start_crate: CrateId, item: SmolStr) -> Option<LangItemTarget>;
 }

@@ -10,7 +10,7 @@ pub(crate) fn parent_module(db: &RootDatabase, position: FilePosition) -> Vec<Na
     let src = hir::ModuleSource::from_position(db, position);
     let module = match hir::Module::from_definition(
         db,
-        hir::Source { file_id: position.file_id.into(), ast: src },
+        hir::Source { file_id: position.file_id.into(), value: src },
     ) {
         None => return Vec::new(),
         Some(it) => it,
@@ -23,7 +23,8 @@ pub(crate) fn parent_module(db: &RootDatabase, position: FilePosition) -> Vec<Na
 pub(crate) fn crate_for(db: &RootDatabase, file_id: FileId) -> Vec<CrateId> {
     let src = hir::ModuleSource::from_file_id(db, file_id);
     let module =
-        match hir::Module::from_definition(db, hir::Source { file_id: file_id.into(), ast: src }) {
+        match hir::Module::from_definition(db, hir::Source { file_id: file_id.into(), value: src })
+        {
             Some(it) => it,
             None => return Vec::new(),
         };
@@ -33,12 +34,14 @@ pub(crate) fn crate_for(db: &RootDatabase, file_id: FileId) -> Vec<CrateId> {
 
 #[cfg(test)]
 mod tests {
+    use ra_cfg::CfgOptions;
+    use ra_db::Env;
+
     use crate::{
         mock_analysis::{analysis_and_position, MockAnalysis},
         AnalysisChange, CrateGraph,
         Edition::Edition2018,
     };
-    use ra_cfg::CfgOptions;
 
     #[test]
     fn test_resolve_parent_module() {
@@ -86,7 +89,12 @@ mod tests {
         assert!(host.analysis().crate_for(mod_file).unwrap().is_empty());
 
         let mut crate_graph = CrateGraph::default();
-        let crate_id = crate_graph.add_crate_root(root_file, Edition2018, CfgOptions::default());
+        let crate_id = crate_graph.add_crate_root(
+            root_file,
+            Edition2018,
+            CfgOptions::default(),
+            Env::default(),
+        );
         let mut change = AnalysisChange::new();
         change.set_crate_graph(crate_graph);
         host.apply_change(change);

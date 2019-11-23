@@ -2,20 +2,15 @@
 //! structs, impls, traits, etc. This module provides a common HIR for these
 //! generic parameters. See also the `Generics` type and the `generics_of` query
 //! in rustc.
-
 use std::sync::Arc;
 
-use hir_def::{
-    path::Path,
-    type_ref::{TypeBound, TypeRef},
-};
-use hir_expand::name::{self, AsName};
-use ra_syntax::ast::{self, DefaultTypeParamOwner, NameOwner, TypeBoundsOwner, TypeParamsOwner};
+use hir_expand::name::{self, AsName, Name};
+use ra_syntax::ast::{self, NameOwner, TypeBoundsOwner, TypeParamsOwner};
 
 use crate::{
-    db::{AstDatabase, DefDatabase, HirDatabase},
-    Adt, Const, Container, Enum, EnumVariant, Function, HasSource, ImplBlock, Name, Struct, Trait,
-    TypeAlias, Union,
+    db::DefDatabase2,
+    type_ref::{TypeBound, TypeRef},
+    AdtId, AstItemDef, ContainerId, GenericDefId, HasSource, Lookup,
 };
 
 /// Data about a generic parameter (to a function, struct, impl, ...).
@@ -24,16 +19,15 @@ pub struct GenericParam {
     // FIXME: give generic params proper IDs
     pub idx: u32,
     pub name: Name,
-    pub default: Option<Path>,
+    pub default: Option<TypeRef>,
 }
 
 /// Data about the generic parameters of a function, struct, impl, etc.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct GenericParams {
-    pub(crate) def: GenericDef,
-    pub(crate) parent_params: Option<Arc<GenericParams>>,
-    pub(crate) params: Vec<GenericParam>,
-    pub(crate) where_predicates: Vec<WherePredicate>,
+    pub parent_params: Option<Arc<GenericParams>>,
+    pub params: Vec<GenericParam>,
+    pub where_predicates: Vec<WherePredicate>,
 }
 
 /// A single predicate from a where clause, i.e. `where Type: Trait`. Combined
@@ -42,81 +36,57 @@ pub struct GenericParams {
 /// associated type bindings like `Iterator<Item = u32>`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct WherePredicate {
-    pub(crate) type_ref: TypeRef,
-    pub(crate) bound: TypeBound,
+    pub type_ref: TypeRef,
+    pub bound: TypeBound,
 }
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum GenericDef {
-    Function(Function),
-    Adt(Adt),
-    Trait(Trait),
-    TypeAlias(TypeAlias),
-    ImplBlock(ImplBlock),
-    // enum variants cannot have generics themselves, but their parent enums
-    // can, and this makes some code easier to write
-    EnumVariant(EnumVariant),
-    // consts can have type parameters from their parents (i.e. associated consts of traits)
-    Const(Const),
-}
-impl_froms!(
-    GenericDef: Function,
-    Adt(Struct, Enum, Union),
-    Trait,
-    TypeAlias,
-    ImplBlock,
-    EnumVariant,
-    Const
-);
 
 impl GenericParams {
     pub(crate) fn generic_params_query(
-        db: &(impl DefDatabase + AstDatabase),
-        def: GenericDef,
+        db: &impl DefDatabase2,
+        def: GenericDefId,
     ) -> Arc<GenericParams> {
-        let parent = match def {
-            GenericDef::Function(it) => it.container(db).map(GenericDef::from),
-            GenericDef::TypeAlias(it) => it.container(db).map(GenericDef::from),
-            GenericDef::Const(it) => it.container(db).map(GenericDef::from),
-            GenericDef::EnumVariant(it) => Some(it.parent_enum(db).into()),
-            GenericDef::Adt(_) | GenericDef::Trait(_) => None,
-            GenericDef::ImplBlock(_) => None,
-        };
-        let mut generics = GenericParams {
-            def,
-            params: Vec::new(),
-            parent_params: parent.map(|p| db.generic_params(p)),
-            where_predicates: Vec::new(),
-        };
+        let parent_generics = parent_generic_def(db, def).map(|it| db.generic_params(it));
+        Arc::new(GenericParams::new(db, def.into(), parent_generics))
+    }
+
+    fn new(
+        db: &impl DefDatabase2,
+        def: GenericDefId,
+        parent_params: Option<Arc<GenericParams>>,
+    ) -> GenericParams {
+        let mut generics =
+            GenericParams { params: Vec::new(), parent_params, where_predicates: Vec::new() };
         let start = generics.parent_params.as_ref().map(|p| p.params.len()).unwrap_or(0) as u32;
         // FIXME: add `: Sized` bound for everything except for `Self` in traits
         match def {
-            GenericDef::Function(it) => generics.fill(&it.source(db).ast, start),
-            GenericDef::Adt(Adt::Struct(it)) => generics.fill(&it.source(db).ast, start),
-            GenericDef::Adt(Adt::Union(it)) => generics.fill(&it.source(db).ast, start),
-            GenericDef::Adt(Adt::Enum(it)) => generics.fill(&it.source(db).ast, start),
-            GenericDef::Trait(it) => {
+            GenericDefId::FunctionId(it) => generics.fill(&it.lookup(db).source(db).value, start),
+            GenericDefId::AdtId(AdtId::StructId(it)) => {
+                generics.fill(&it.0.source(db).value, start)
+            }
+            GenericDefId::AdtId(AdtId::UnionId(it)) => generics.fill(&it.0.source(db).value, start),
+            GenericDefId::AdtId(AdtId::EnumId(it)) => generics.fill(&it.source(db).value, start),
+            GenericDefId::TraitId(it) => {
                 // traits get the Self type as an implicit first type parameter
                 generics.params.push(GenericParam {
                     idx: start,
                     name: name::SELF_TYPE,
                     default: None,
                 });
-                generics.fill(&it.source(db).ast, start + 1);
+                generics.fill(&it.source(db).value, start + 1);
                 // add super traits as bounds on Self
                 // i.e., trait Foo: Bar is equivalent to trait Foo where Self: Bar
                 let self_param = TypeRef::Path(name::SELF_TYPE.into());
-                generics.fill_bounds(&it.source(db).ast, self_param);
+                generics.fill_bounds(&it.source(db).value, self_param);
             }
-            GenericDef::TypeAlias(it) => generics.fill(&it.source(db).ast, start),
+            GenericDefId::TypeAliasId(it) => generics.fill(&it.lookup(db).source(db).value, start),
             // Note that we don't add `Self` here: in `impl`s, `Self` is not a
             // type-parameter, but rather is a type-alias for impl's target
             // type, so this is handled by the resolver.
-            GenericDef::ImplBlock(it) => generics.fill(&it.source(db).ast, start),
-            GenericDef::EnumVariant(_) | GenericDef::Const(_) => {}
+            GenericDefId::ImplId(it) => generics.fill(&it.source(db).value, start),
+            GenericDefId::EnumVariantId(_) | GenericDefId::ConstId(_) => {}
         }
 
-        Arc::new(generics)
+        generics
     }
 
     fn fill(&mut self, node: &impl TypeParamsOwner, start: u32) {
@@ -140,8 +110,7 @@ impl GenericParams {
         for (idx, type_param) in params.type_params().enumerate() {
             let name = type_param.name().map_or_else(Name::missing, |it| it.as_name());
             // FIXME: Use `Path::from_src`
-            let default = type_param.default_type().and_then(|t| t.path()).and_then(Path::from_ast);
-
+            let default = type_param.default_type().map(TypeRef::from_ast);
             let param = GenericParam { idx: idx as u32 + start, name: name.clone(), default };
             self.params.push(param);
 
@@ -172,7 +141,7 @@ impl GenericParams {
         self.where_predicates.push(WherePredicate { type_ref, bound });
     }
 
-    pub(crate) fn find_by_name(&self, name: &Name) -> Option<&GenericParam> {
+    pub fn find_by_name(&self, name: &Name) -> Option<&GenericParam> {
         self.params.iter().find(|p| &p.name == name)
     }
 
@@ -199,38 +168,18 @@ impl GenericParams {
     }
 }
 
-impl GenericDef {
-    pub(crate) fn resolver(&self, db: &impl HirDatabase) -> crate::Resolver {
-        match self {
-            GenericDef::Function(inner) => inner.resolver(db),
-            GenericDef::Adt(adt) => adt.resolver(db),
-            GenericDef::Trait(inner) => inner.resolver(db),
-            GenericDef::TypeAlias(inner) => inner.resolver(db),
-            GenericDef::ImplBlock(inner) => inner.resolver(db),
-            GenericDef::EnumVariant(inner) => inner.parent_enum(db).resolver(db),
-            GenericDef::Const(inner) => inner.resolver(db),
-        }
-    }
-}
+fn parent_generic_def(db: &impl DefDatabase2, def: GenericDefId) -> Option<GenericDefId> {
+    let container = match def {
+        GenericDefId::FunctionId(it) => it.lookup(db).container,
+        GenericDefId::TypeAliasId(it) => it.lookup(db).container,
+        GenericDefId::ConstId(it) => it.lookup(db).container,
+        GenericDefId::EnumVariantId(it) => return Some(it.parent.into()),
+        GenericDefId::AdtId(_) | GenericDefId::TraitId(_) | GenericDefId::ImplId(_) => return None,
+    };
 
-impl From<Container> for GenericDef {
-    fn from(c: Container) -> Self {
-        match c {
-            Container::Trait(trait_) => trait_.into(),
-            Container::ImplBlock(impl_block) => impl_block.into(),
-        }
-    }
-}
-
-pub trait HasGenericParams: Copy {
-    fn generic_params(self, db: &impl DefDatabase) -> Arc<GenericParams>;
-}
-
-impl<T> HasGenericParams for T
-where
-    T: Into<GenericDef> + Copy,
-{
-    fn generic_params(self, db: &impl DefDatabase) -> Arc<GenericParams> {
-        db.generic_params(self.into())
+    match container {
+        ContainerId::ImplId(it) => Some(it.into()),
+        ContainerId::TraitId(it) => Some(it.into()),
+        ContainerId::ModuleId(_) => None,
     }
 }

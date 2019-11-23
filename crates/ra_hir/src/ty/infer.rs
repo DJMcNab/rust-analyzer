@@ -22,8 +22,11 @@ use ena::unify::{InPlaceUnificationTable, NoError, UnifyKey, UnifyValue};
 use rustc_hash::FxHashMap;
 
 use hir_def::{
+    data::{ConstData, FunctionData},
     path::known,
+    resolver::{HasResolver, Resolver, TypeNs},
     type_ref::{Mutability, TypeRef},
+    AdtId, DefWithBodyId,
 };
 use hir_expand::{diagnostics::DiagnosticSink, name};
 use ra_arena::map::ArenaMap;
@@ -37,14 +40,12 @@ use super::{
     TypeCtor, TypeWalk, Uncertain,
 };
 use crate::{
-    adt::VariantDef,
     code_model::TypeAlias,
     db::HirDatabase,
     expr::{BindingAnnotation, Body, ExprId, PatId},
-    resolve::{Resolver, TypeNs},
     ty::infer::diagnostics::InferenceDiagnostic,
-    Adt, AssocItem, ConstData, DefWithBody, FloatTy, FnData, Function, HasBody, IntTy, Path,
-    StructField,
+    Adt, AssocItem, DefWithBody, FloatTy, Function, HasBody, IntTy, Path, StructField, Trait,
+    VariantDef,
 };
 
 macro_rules! ty_app {
@@ -65,13 +66,13 @@ mod coerce;
 /// The entry point of type inference.
 pub fn infer_query(db: &impl HirDatabase, def: DefWithBody) -> Arc<InferenceResult> {
     let _p = profile("infer_query");
-    let resolver = def.resolver(db);
+    let resolver = DefWithBodyId::from(def).resolver(db);
     let mut ctx = InferenceContext::new(db, def, resolver);
 
-    match def {
-        DefWithBody::Const(ref c) => ctx.collect_const(&c.data(db)),
-        DefWithBody::Function(ref f) => ctx.collect_fn(&f.data(db)),
-        DefWithBody::Static(ref s) => ctx.collect_const(&s.data(db)),
+    match &def {
+        DefWithBody::Const(c) => ctx.collect_const(&db.const_data(c.id)),
+        DefWithBody::Function(f) => ctx.collect_fn(&db.function_data(f.id)),
+        DefWithBody::Static(s) => ctx.collect_const(&db.static_data(s.id)),
     }
 
     ctx.infer_body();
@@ -378,8 +379,9 @@ impl<'a, D: HirDatabase> InferenceContext<'a, D> {
         for obligation in obligations {
             let in_env = InEnvironment::new(self.trait_env.clone(), obligation.clone());
             let canonicalized = self.canonicalizer().canonicalize_obligation(in_env);
-            let solution =
-                self.db.trait_solve(self.resolver.krate().unwrap(), canonicalized.value.clone());
+            let solution = self
+                .db
+                .trait_solve(self.resolver.krate().unwrap().into(), canonicalized.value.clone());
 
             match solution {
                 Some(Solution::Unique(substs)) => {
@@ -519,17 +521,17 @@ impl<'a, D: HirDatabase> InferenceContext<'a, D> {
             // FIXME: this should resolve assoc items as well, see this example:
             // https://play.rust-lang.org/?gist=087992e9e22495446c01c0d4e2d69521
             match resolver.resolve_path_in_type_ns_fully(self.db, &path) {
-                Some(TypeNs::Adt(Adt::Struct(it))) => it.into(),
-                Some(TypeNs::Adt(Adt::Union(it))) => it.into(),
+                Some(TypeNs::AdtId(AdtId::StructId(it))) => it.into(),
+                Some(TypeNs::AdtId(AdtId::UnionId(it))) => it.into(),
                 Some(TypeNs::AdtSelfType(adt)) => adt.into(),
-                Some(TypeNs::EnumVariant(it)) => it.into(),
-                Some(TypeNs::TypeAlias(it)) => it.into(),
+                Some(TypeNs::EnumVariantId(it)) => it.into(),
+                Some(TypeNs::TypeAliasId(it)) => it.into(),
 
                 Some(TypeNs::SelfType(_)) |
                 Some(TypeNs::GenericParam(_)) |
                 Some(TypeNs::BuiltinType(_)) |
-                Some(TypeNs::Trait(_)) |
-                Some(TypeNs::Adt(Adt::Enum(_))) |
+                Some(TypeNs::TraitId(_)) |
+                Some(TypeNs::AdtId(AdtId::EnumId(_))) |
                 None => {
                     return (Ty::Unknown, None)
                 }
@@ -558,17 +560,17 @@ impl<'a, D: HirDatabase> InferenceContext<'a, D> {
     }
 
     fn collect_const(&mut self, data: &ConstData) {
-        self.return_ty = self.make_ty(data.type_ref());
+        self.return_ty = self.make_ty(&data.type_ref);
     }
 
-    fn collect_fn(&mut self, data: &FnData) {
+    fn collect_fn(&mut self, data: &FunctionData) {
         let body = Arc::clone(&self.body); // avoid borrow checker problem
-        for (type_ref, pat) in data.params().iter().zip(body.params()) {
+        for (type_ref, pat) in data.params.iter().zip(body.params()) {
             let ty = self.make_ty(type_ref);
 
             self.infer_pat(*pat, &ty, BindingMode::default());
         }
-        self.return_ty = self.make_ty(data.ret_type());
+        self.return_ty = self.make_ty(&data.ret_type);
     }
 
     fn infer_body(&mut self) {
@@ -577,26 +579,26 @@ impl<'a, D: HirDatabase> InferenceContext<'a, D> {
 
     fn resolve_into_iter_item(&self) -> Option<TypeAlias> {
         let path = known::std_iter_into_iterator();
-        let trait_ = self.resolver.resolve_known_trait(self.db, &path)?;
+        let trait_: Trait = self.resolver.resolve_known_trait(self.db, &path)?.into();
         trait_.associated_type_by_name(self.db, &name::ITEM_TYPE)
     }
 
     fn resolve_ops_try_ok(&self) -> Option<TypeAlias> {
         let path = known::std_ops_try();
-        let trait_ = self.resolver.resolve_known_trait(self.db, &path)?;
+        let trait_: Trait = self.resolver.resolve_known_trait(self.db, &path)?.into();
         trait_.associated_type_by_name(self.db, &name::OK_TYPE)
     }
 
     fn resolve_future_future_output(&self) -> Option<TypeAlias> {
         let path = known::std_future_future();
-        let trait_ = self.resolver.resolve_known_trait(self.db, &path)?;
+        let trait_: Trait = self.resolver.resolve_known_trait(self.db, &path)?.into();
         trait_.associated_type_by_name(self.db, &name::OUTPUT_TYPE)
     }
 
     fn resolve_boxed_box(&self) -> Option<Adt> {
         let path = known::std_boxed_box();
         let struct_ = self.resolver.resolve_known_struct(self.db, &path)?;
-        Some(Adt::Struct(struct_))
+        Some(Adt::Struct(struct_.into()))
     }
 }
 

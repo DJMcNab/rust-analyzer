@@ -3,8 +3,6 @@
 
 mod autoderef;
 pub(crate) mod primitive;
-#[cfg(test)]
-mod tests;
 pub(crate) mod traits;
 pub(crate) mod method_resolution;
 mod op;
@@ -12,16 +10,18 @@ mod lower;
 mod infer;
 pub(crate) mod display;
 
+#[cfg(test)]
+mod tests;
+
 use std::ops::Deref;
 use std::sync::Arc;
 use std::{fmt, iter, mem};
 
+use hir_def::{generics::GenericParams, AdtId};
+
 use crate::{
-    db::HirDatabase,
-    expr::ExprId,
-    generics::{GenericParams, HasGenericParams},
-    util::make_mut_slice,
-    Adt, Crate, DefWithBody, FloatTy, IntTy, Mutability, Name, Trait, TypeAlias, Uncertain,
+    db::HirDatabase, expr::ExprId, util::make_mut_slice, Adt, Crate, DefWithBody, FloatTy,
+    GenericDef, IntTy, Mutability, Name, Trait, TypeAlias, Uncertain,
 };
 use display::{HirDisplay, HirFormatter};
 
@@ -130,15 +130,15 @@ impl TypeCtor {
             | TypeCtor::Closure { .. } // 1 param representing the signature of the closure
             => 1,
             TypeCtor::Adt(adt) => {
-                let generic_params = adt.generic_params(db);
+                let generic_params = db.generic_params(AdtId::from(adt).into());
                 generic_params.count_params_including_parent()
             }
             TypeCtor::FnDef(callable) => {
-                let generic_params = callable.generic_params(db);
+                let generic_params = db.generic_params(callable.into());
                 generic_params.count_params_including_parent()
             }
             TypeCtor::AssociatedType(type_alias) => {
-                let generic_params = type_alias.generic_params(db);
+                let generic_params = db.generic_params(type_alias.id.into());
                 generic_params.count_params_including_parent()
             }
             TypeCtor::FnPtr { num_args } => num_args as usize + 1,
@@ -167,7 +167,7 @@ impl TypeCtor {
         }
     }
 
-    pub fn as_generic_def(self) -> Option<crate::generics::GenericDef> {
+    pub fn as_generic_def(self) -> Option<crate::GenericDef> {
         match self {
             TypeCtor::Bool
             | TypeCtor::Char
@@ -347,8 +347,9 @@ impl Substs {
         )
     }
 
-    pub fn build_for_def(db: &impl HirDatabase, def: impl HasGenericParams) -> SubstsBuilder {
-        let params = def.generic_params(db);
+    pub fn build_for_def(db: &impl HirDatabase, def: impl Into<GenericDef>) -> SubstsBuilder {
+        let def = def.into();
+        let params = db.generic_params(def.into());
         let param_count = params.count_params_including_parent();
         Substs::builder(param_count)
     }
@@ -800,6 +801,10 @@ impl HirDisplay for &Ty {
 
 impl HirDisplay for ApplicationTy {
     fn hir_fmt(&self, f: &mut HirFormatter<impl HirDatabase>) -> fmt::Result {
+        if f.should_truncate() {
+            return write!(f, "…");
+        }
+
         match self.ctor {
             TypeCtor::Bool => write!(f, "bool")?,
             TypeCtor::Char => write!(f, "char")?,
@@ -901,6 +906,10 @@ impl HirDisplay for ApplicationTy {
 
 impl HirDisplay for ProjectionTy {
     fn hir_fmt(&self, f: &mut HirFormatter<impl HirDatabase>) -> fmt::Result {
+        if f.should_truncate() {
+            return write!(f, "…");
+        }
+
         let trait_name = self
             .associated_ty
             .parent_trait(f.db)
@@ -919,6 +928,10 @@ impl HirDisplay for ProjectionTy {
 
 impl HirDisplay for Ty {
     fn hir_fmt(&self, f: &mut HirFormatter<impl HirDatabase>) -> fmt::Result {
+        if f.should_truncate() {
+            return write!(f, "…");
+        }
+
         match self {
             Ty::Apply(a_ty) => a_ty.hir_fmt(f)?,
             Ty::Projection(p_ty) => p_ty.hir_fmt(f)?,
@@ -1001,6 +1014,10 @@ impl HirDisplay for Ty {
 
 impl TraitRef {
     fn hir_fmt_ext(&self, f: &mut HirFormatter<impl HirDatabase>, use_as: bool) -> fmt::Result {
+        if f.should_truncate() {
+            return write!(f, "…");
+        }
+
         self.substs[0].hir_fmt(f)?;
         if use_as {
             write!(f, " as ")?;
@@ -1031,6 +1048,10 @@ impl HirDisplay for &GenericPredicate {
 
 impl HirDisplay for GenericPredicate {
     fn hir_fmt(&self, f: &mut HirFormatter<impl HirDatabase>) -> fmt::Result {
+        if f.should_truncate() {
+            return write!(f, "…");
+        }
+
         match self {
             GenericPredicate::Implemented(trait_ref) => trait_ref.hir_fmt(f)?,
             GenericPredicate::Projection(projection_pred) => {

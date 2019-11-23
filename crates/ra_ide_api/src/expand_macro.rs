@@ -23,7 +23,7 @@ pub(crate) fn expand_macro(db: &RootDatabase, position: FilePosition) -> Option<
     let mac = name_ref.syntax().ancestors().find_map(ast::MacroCall::cast)?;
 
     let source = hir::Source::new(position.file_id.into(), mac.syntax());
-    let expanded = expand_macro_recur(db, source, &mac)?;
+    let expanded = expand_macro_recur(db, source, source.with_value(&mac))?;
 
     // FIXME:
     // macro expansion may lose all white space information
@@ -35,21 +35,28 @@ pub(crate) fn expand_macro(db: &RootDatabase, position: FilePosition) -> Option<
 fn expand_macro_recur(
     db: &RootDatabase,
     source: hir::Source<&SyntaxNode>,
-    macro_call: &ast::MacroCall,
+    macro_call: hir::Source<&ast::MacroCall>,
 ) -> Option<SyntaxNode> {
     let analyzer = hir::SourceAnalyzer::new(db, source, None);
-    let expansion = analyzer.expand(db, &macro_call)?;
+    let expansion = analyzer.expand(db, macro_call)?;
     let macro_file_id = expansion.file_id();
-    let expanded: SyntaxNode = db.parse_or_expand(macro_file_id)?;
+    let mut expanded: SyntaxNode = db.parse_or_expand(macro_file_id)?;
 
     let children = expanded.descendants().filter_map(ast::MacroCall::cast);
     let mut replaces = FxHashMap::default();
 
     for child in children.into_iter() {
-        let source = hir::Source::new(macro_file_id, source.ast);
-        let new_node = expand_macro_recur(db, source, &child)?;
+        let node = hir::Source::new(macro_file_id, &child);
+        let new_node = expand_macro_recur(db, source, node)?;
 
-        replaces.insert(child.syntax().clone().into(), new_node.into());
+        // Replace the whole node if it is root
+        // `replace_descendants` will not replace the parent node
+        // but `SyntaxNode::descendants include itself
+        if expanded == *child.syntax() {
+            expanded = new_node;
+        } else {
+            replaces.insert(child.syntax().clone().into(), new_node.into());
+        }
     }
 
     Some(replace_descendants(&expanded, &replaces))
@@ -84,24 +91,19 @@ fn insert_whitespaces(syn: SyntaxNode) -> String {
         };
 
         res += &match token.kind() {
-            k @ _
-                if (k.is_keyword() || k.is_literal() || k == IDENT)
-                    && is_next(|it| !it.is_punct(), true) =>
-            {
+            k @ _ if is_text(k) && is_next(|it| !it.is_punct(), true) => {
                 token.text().to_string() + " "
             }
             L_CURLY if is_next(|it| it != R_CURLY, true) => {
                 indent += 1;
-                format!(" {{\n{}", "  ".repeat(indent))
+                let leading_space = if is_last(|it| is_text(it), false) { " " } else { "" };
+                format!("{}{{\n{}", leading_space, "  ".repeat(indent))
             }
             R_CURLY if is_last(|it| it != L_CURLY, true) => {
                 indent = indent.checked_sub(1).unwrap_or(0);
-                format!("\n}}{}", "  ".repeat(indent))
+                format!("\n{}}}", "  ".repeat(indent))
             }
-            R_CURLY => {
-                indent = indent.checked_sub(1).unwrap_or(0);
-                format!("}}\n{}", "  ".repeat(indent))
-            }
+            R_CURLY => format!("}}\n{}", "  ".repeat(indent)),
             T![;] => format!(";\n{}", "  ".repeat(indent)),
             T![->] => " -> ".to_string(),
             T![=] => " = ".to_string(),
@@ -112,7 +114,11 @@ fn insert_whitespaces(syn: SyntaxNode) -> String {
         last = Some(token.kind());
     }
 
-    res
+    return res;
+
+    fn is_text(k: SyntaxKind) -> bool {
+        k.is_keyword() || k.is_literal() || k == IDENT
+    }
 }
 
 #[cfg(test)]
@@ -139,7 +145,7 @@ mod tests {
         }
         macro_rules! baz {
             () => { foo!(); }
-        }        
+        }
         f<|>oo!();
         "#,
         );
@@ -156,7 +162,7 @@ fn b(){}
             r#"
         //- /lib.rs
         macro_rules! foo {
-            () => { 
+            () => {
                 fn some_thing() -> u32 {
                     let a = 0;
                     a + 10
@@ -172,7 +178,73 @@ fn b(){}
 fn some_thing() -> u32 {
   let a = 0;
   a+10
-}        
+}
 "###);
+    }
+
+    #[test]
+    fn macro_expand_match_ast() {
+        let res = check_expand_macro(
+            r#"
+        //- /lib.rs
+        macro_rules! match_ast {
+            (match $node:ident { $($tt:tt)* }) => { match_ast!(match ($node) { $($tt)* }) };
+        
+            (match ($node:expr) {
+                $( ast::$ast:ident($it:ident) => $res:block, )*
+                _ => $catch_all:expr $(,)?
+            }) => {{
+                $( if let Some($it) = ast::$ast::cast($node.clone()) $res else )*
+                { $catch_all }
+            }};
+        }        
+
+        fn main() {
+            mat<|>ch_ast! {
+                match container {
+                    ast::TraitDef(it) => {},
+                    ast::ImplBlock(it) => {},
+                    _ => { continue },
+                }
+            }
+        }
+        "#,
+        );
+
+        assert_eq!(res.name, "match_ast");
+        assert_snapshot!(res.expansion, @r###"
+{
+  if let Some(it) = ast::TraitDef::cast(container.clone()){}
+  else if let Some(it) = ast::ImplBlock::cast(container.clone()){}
+  else {
+    {
+      continue
+    }
+  }
+}
+"###);
+    }
+
+    #[test]
+    fn macro_expand_match_ast_inside_let_statement() {
+        let res = check_expand_macro(
+            r#"
+        //- /lib.rs
+        macro_rules! match_ast {
+            (match $node:ident { $($tt:tt)* }) => { match_ast!(match ($node) { $($tt)* }) };        
+            (match ($node:expr) {}) => {{}};
+        }        
+
+        fn main() {        
+            let p = f(|it| {
+                let res = mat<|>ch_ast! { match c {}};
+                Some(res)
+            })?;
+        }
+        "#,
+        );
+
+        assert_eq!(res.name, "match_ast");
+        assert_snapshot!(res.expansion, @r###"{}"###);
     }
 }

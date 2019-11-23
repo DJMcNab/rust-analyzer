@@ -10,6 +10,8 @@ use std::sync::Arc;
 use hir_def::{
     expr::{ExprId, PatId},
     path::known,
+    resolver::{self, resolver_for_scope, HasResolver, Resolver, TypeNs, ValueNs},
+    DefWithBodyId,
 };
 use hir_expand::{name::AsName, AstId, MacroCallId, MacroCallLoc, MacroFileKind, Source};
 use ra_syntax::{
@@ -21,36 +23,38 @@ use ra_syntax::{
 
 use crate::{
     db::HirDatabase,
-    expr::{self, BodySourceMap, ExprScopes, ScopeId},
+    expr::{BodySourceMap, ExprScopes, ScopeId},
     ids::LocationCtx,
-    resolve::{ScopeDef, TypeNs, ValueNs},
     ty::method_resolution::{self, implements_trait},
-    AssocItem, Const, DefWithBody, Either, Enum, FromSource, Function, GenericParam, HasBody,
-    HirFileId, Local, MacroDef, Module, Name, Path, Resolver, Static, Struct, Ty,
+    Adt, AssocItem, Const, DefWithBody, Either, Enum, EnumVariant, FromSource, Function,
+    GenericParam, HasBody, HirFileId, Local, MacroDef, Module, Name, Path, ScopeDef, Static,
+    Struct, Trait, Ty, TypeAlias,
 };
 
 fn try_get_resolver_for_node(db: &impl HirDatabase, node: Source<&SyntaxNode>) -> Option<Resolver> {
     match_ast! {
-        match (node.ast) {
+        match (node.value) {
             ast::Module(it) => {
-                let src = node.with_ast(it);
-                Some(crate::Module::from_declaration(db, src)?.resolver(db))
+                let src = node.with_value(it);
+                Some(crate::Module::from_declaration(db, src)?.id.resolver(db))
             },
              ast::SourceFile(it) => {
-                let src = node.with_ast(crate::ModuleSource::SourceFile(it));
-                Some(crate::Module::from_definition(db, src)?.resolver(db))
+                let src = node.with_value(crate::ModuleSource::SourceFile(it));
+                Some(crate::Module::from_definition(db, src)?.id.resolver(db))
             },
             ast::StructDef(it) => {
-                let src = node.with_ast(it);
-                Some(Struct::from_source(db, src)?.resolver(db))
+                let src = node.with_value(it);
+                Some(Struct::from_source(db, src)?.id.resolver(db))
             },
             ast::EnumDef(it) => {
-                let src = node.with_ast(it);
-                Some(Enum::from_source(db, src)?.resolver(db))
+                let src = node.with_value(it);
+                Some(Enum::from_source(db, src)?.id.resolver(db))
             },
-            _ => match node.ast.kind() {
+            _ => match node.value.kind() {
                 FN_DEF | CONST_DEF | STATIC_DEF => {
-                    Some(def_with_body_from_child_node(db, node)?.resolver(db))
+                    let def = def_with_body_from_child_node(db, node)?;
+                    let def = DefWithBodyId::from(def);
+                    Some(def.resolver(db))
                 }
                 // FIXME add missing cases
                 _ => None
@@ -67,11 +71,11 @@ fn def_with_body_from_child_node(
     let module = Module::from_definition(db, Source::new(child.file_id, module_source))?;
     let ctx = LocationCtx::new(db, module.id, child.file_id);
 
-    child.ast.ancestors().find_map(|node| {
+    child.value.ancestors().find_map(|node| {
         match_ast! {
             match node {
-                ast::FnDef(def)  => { Some(Function {id: ctx.to_def(&def) }.into()) },
-                ast::ConstDef(def) => { Some(Const { id: ctx.to_def(&def) }.into()) },
+                ast::FnDef(def)  => { return Function::from_source(db, child.with_value(def)).map(DefWithBody::from); },
+                ast::ConstDef(def) => { return Const::from_source(db, child.with_value(def)).map(DefWithBody::from); },
                 ast::StaticDef(def) => { Some(Static { id: ctx.to_def(&def) }.into()) },
                 _ => { None },
             }
@@ -127,6 +131,7 @@ pub struct ReferenceDescriptor {
 }
 
 pub struct Expansion {
+    macro_file_kind: MacroFileKind,
     macro_call_id: MacroCallId,
 }
 
@@ -141,7 +146,7 @@ impl Expansion {
     }
 
     pub fn file_id(&self) -> HirFileId {
-        self.macro_call_id.as_file(MacroFileKind::Items)
+        self.macro_call_id.as_file(self.macro_file_kind)
     }
 }
 
@@ -157,9 +162,9 @@ impl SourceAnalyzer {
             let scopes = def.expr_scopes(db);
             let scope = match offset {
                 None => scope_for(&scopes, &source_map, node),
-                Some(offset) => scope_for_offset(&scopes, &source_map, node.with_ast(offset)),
+                Some(offset) => scope_for_offset(&scopes, &source_map, node.with_value(offset)),
             };
-            let resolver = expr::resolver_for_scope(db, def, scope);
+            let resolver = resolver_for_scope(db, def.into(), scope);
             SourceAnalyzer {
                 resolver,
                 body_owner: Some(def),
@@ -171,9 +176,9 @@ impl SourceAnalyzer {
         } else {
             SourceAnalyzer {
                 resolver: node
-                    .ast
+                    .value
                     .ancestors()
-                    .find_map(|it| try_get_resolver_for_node(db, node.with_ast(&it)))
+                    .find_map(|it| try_get_resolver_for_node(db, node.with_value(&it)))
                     .unwrap_or_default(),
                 body_owner: None,
                 body_source_map: None,
@@ -185,12 +190,12 @@ impl SourceAnalyzer {
     }
 
     fn expr_id(&self, expr: &ast::Expr) -> Option<ExprId> {
-        let src = Source { file_id: self.file_id, ast: expr };
+        let src = Source { file_id: self.file_id, value: expr };
         self.body_source_map.as_ref()?.node_expr(src)
     }
 
     fn pat_id(&self, pat: &ast::Pat) -> Option<PatId> {
-        let src = Source { file_id: self.file_id, ast: pat };
+        let src = Source { file_id: self.file_id, value: pat };
         self.body_source_map.as_ref()?.node_pat(src)
     }
 
@@ -231,7 +236,7 @@ impl SourceAnalyzer {
     ) -> Option<MacroDef> {
         // This must be a normal source file rather than macro file.
         let path = macro_call.path().and_then(Path::from_ast)?;
-        self.resolver.resolve_path_as_macro(db, &path)
+        self.resolver.resolve_path_as_macro(db, &path).map(|it| it.into())
     }
 
     pub fn resolve_hir_path(
@@ -240,16 +245,18 @@ impl SourceAnalyzer {
         path: &crate::Path,
     ) -> Option<PathResolution> {
         let types = self.resolver.resolve_path_in_type_ns_fully(db, &path).map(|ty| match ty {
-            TypeNs::SelfType(it) => PathResolution::SelfType(it),
+            TypeNs::SelfType(it) => PathResolution::SelfType(it.into()),
             TypeNs::GenericParam(idx) => PathResolution::GenericParam(GenericParam {
-                parent: self.resolver.generic_def().unwrap(),
+                parent: self.resolver.generic_def().unwrap().into(),
                 idx,
             }),
-            TypeNs::AdtSelfType(it) | TypeNs::Adt(it) => PathResolution::Def(it.into()),
-            TypeNs::EnumVariant(it) => PathResolution::Def(it.into()),
-            TypeNs::TypeAlias(it) => PathResolution::Def(it.into()),
+            TypeNs::AdtSelfType(it) | TypeNs::AdtId(it) => {
+                PathResolution::Def(Adt::from(it).into())
+            }
+            TypeNs::EnumVariantId(it) => PathResolution::Def(EnumVariant::from(it).into()),
+            TypeNs::TypeAliasId(it) => PathResolution::Def(TypeAlias::from(it).into()),
             TypeNs::BuiltinType(it) => PathResolution::Def(it.into()),
-            TypeNs::Trait(it) => PathResolution::Def(it.into()),
+            TypeNs::TraitId(it) => PathResolution::Def(Trait::from(it).into()),
         });
         let values = self.resolver.resolve_path_in_value_ns_fully(db, &path).and_then(|val| {
             let res = match val {
@@ -257,11 +264,11 @@ impl SourceAnalyzer {
                     let var = Local { parent: self.body_owner?, pat_id };
                     PathResolution::Local(var)
                 }
-                ValueNs::Function(it) => PathResolution::Def(it.into()),
-                ValueNs::Const(it) => PathResolution::Def(it.into()),
-                ValueNs::Static(it) => PathResolution::Def(it.into()),
-                ValueNs::Struct(it) => PathResolution::Def(it.into()),
-                ValueNs::EnumVariant(it) => PathResolution::Def(it.into()),
+                ValueNs::FunctionId(it) => PathResolution::Def(Function::from(it).into()),
+                ValueNs::ConstId(it) => PathResolution::Def(Const::from(it).into()),
+                ValueNs::StaticId(it) => PathResolution::Def(Static::from(it).into()),
+                ValueNs::StructId(it) => PathResolution::Def(Struct::from(it).into()),
+                ValueNs::EnumVariantId(it) => PathResolution::Def(EnumVariant::from(it).into()),
             };
             Some(res)
         });
@@ -272,7 +279,9 @@ impl SourceAnalyzer {
             .take_types()
             .map(|it| PathResolution::Def(it.into()));
         types.or(values).or(items).or_else(|| {
-            self.resolver.resolve_path_as_macro(db, &path).map(|def| PathResolution::Macro(def))
+            self.resolver
+                .resolve_path_as_macro(db, &path)
+                .map(|def| PathResolution::Macro(def.into()))
         })
     }
 
@@ -302,12 +311,27 @@ impl SourceAnalyzer {
         let entry = scopes.resolve_name_in_scope(scope, &name)?;
         Some(ScopeEntryWithSyntax {
             name: entry.name().clone(),
-            ptr: source_map.pat_syntax(entry.pat())?.ast,
+            ptr: source_map.pat_syntax(entry.pat())?.value,
         })
     }
 
     pub fn process_all_names(&self, db: &impl HirDatabase, f: &mut dyn FnMut(Name, ScopeDef)) {
-        self.resolver.process_all_names(db, f)
+        self.resolver.process_all_names(db, &mut |name, def| {
+            let def = match def {
+                resolver::ScopeDef::PerNs(it) => it.into(),
+                resolver::ScopeDef::ImplSelfType(it) => ScopeDef::ImplSelfType(it.into()),
+                resolver::ScopeDef::AdtSelfType(it) => ScopeDef::AdtSelfType(it.into()),
+                resolver::ScopeDef::GenericParam(idx) => {
+                    let parent = self.resolver.generic_def().unwrap().into();
+                    ScopeDef::GenericParam(GenericParam { parent, idx })
+                }
+                resolver::ScopeDef::Local(pat_id) => {
+                    let parent = self.resolver.body_owner().unwrap().into();
+                    ScopeDef::Local(Local { parent, pat_id })
+                }
+            };
+            f(name, def)
+        })
     }
 
     // FIXME: we only use this in `inline_local_variable` assist, ideally, we
@@ -392,7 +416,7 @@ impl SourceAnalyzer {
         let std_future_path = known::std_future_future();
 
         let std_future_trait = match self.resolver.resolve_known_trait(db, &std_future_path) {
-            Some(it) => it,
+            Some(it) => it.into(),
             _ => return false,
         };
 
@@ -402,14 +426,24 @@ impl SourceAnalyzer {
         };
 
         let canonical_ty = crate::ty::Canonical { value: ty, num_vars: 0 };
-        implements_trait(&canonical_ty, db, &self.resolver, krate, std_future_trait)
+        implements_trait(&canonical_ty, db, &self.resolver, krate.into(), std_future_trait)
     }
 
-    pub fn expand(&self, db: &impl HirDatabase, macro_call: &ast::MacroCall) -> Option<Expansion> {
-        let def = self.resolve_macro_call(db, macro_call)?.id;
-        let ast_id = AstId::new(self.file_id, db.ast_id_map(self.file_id).ast_id(macro_call));
+    pub fn expand(
+        &self,
+        db: &impl HirDatabase,
+        macro_call: Source<&ast::MacroCall>,
+    ) -> Option<Expansion> {
+        let def = self.resolve_macro_call(db, macro_call.value)?.id;
+        let ast_id = AstId::new(
+            macro_call.file_id,
+            db.ast_id_map(macro_call.file_id).ast_id(macro_call.value),
+        );
         let macro_call_loc = MacroCallLoc { def, ast_id };
-        Some(Expansion { macro_call_id: db.intern_macro(macro_call_loc) })
+        Some(Expansion {
+            macro_call_id: db.intern_macro(macro_call_loc),
+            macro_file_kind: to_macro_file_kind(macro_call.value),
+        })
     }
 
     #[cfg(test)]
@@ -421,6 +455,11 @@ impl SourceAnalyzer {
     pub(crate) fn inference_result(&self) -> Arc<crate::ty::InferenceResult> {
         self.infer.clone().unwrap()
     }
+
+    #[cfg(test)]
+    pub(crate) fn analyzed_declaration(&self) -> Option<DefWithBody> {
+        self.body_owner
+    }
 }
 
 fn scope_for(
@@ -428,7 +467,7 @@ fn scope_for(
     source_map: &BodySourceMap,
     node: Source<&SyntaxNode>,
 ) -> Option<ScopeId> {
-    node.ast
+    node.value
         .ancestors()
         .filter_map(ast::Expr::cast)
         .filter_map(|it| source_map.node_expr(Source::new(node.file_id, &it)))
@@ -450,18 +489,18 @@ fn scope_for_offset(
                 return None;
             }
             let syntax_node_ptr =
-                source.ast.either(|it| it.syntax_node_ptr(), |it| it.syntax_node_ptr());
+                source.value.either(|it| it.syntax_node_ptr(), |it| it.syntax_node_ptr());
             Some((syntax_node_ptr, scope))
         })
         // find containing scope
         .min_by_key(|(ptr, _scope)| {
             (
-                !(ptr.range().start() <= offset.ast && offset.ast <= ptr.range().end()),
+                !(ptr.range().start() <= offset.value && offset.value <= ptr.range().end()),
                 ptr.range().len(),
             )
         })
         .map(|(ptr, scope)| {
-            adjust(scopes, source_map, ptr, offset.file_id, offset.ast).unwrap_or(*scope)
+            adjust(scopes, source_map, ptr, offset.file_id, offset.value).unwrap_or(*scope)
         })
 }
 
@@ -485,7 +524,7 @@ fn adjust(
                 return None;
             }
             let syntax_node_ptr =
-                source.ast.either(|it| it.syntax_node_ptr(), |it| it.syntax_node_ptr());
+                source.value.either(|it| it.syntax_node_ptr(), |it| it.syntax_node_ptr());
             Some((syntax_node_ptr, scope))
         })
         .map(|(ptr, scope)| (ptr.range(), scope))
@@ -502,4 +541,36 @@ fn adjust(
             }
         })
         .map(|(_ptr, scope)| *scope)
+}
+
+/// Given a `ast::MacroCall`, return what `MacroKindFile` it belongs to.
+/// FIXME: Not completed  
+fn to_macro_file_kind(macro_call: &ast::MacroCall) -> MacroFileKind {
+    let syn = macro_call.syntax();
+    let parent = match syn.parent() {
+        Some(it) => it,
+        None => {
+            // FIXME:
+            // If it is root, which means the parent HirFile
+            // MacroKindFile must be non-items
+            // return expr now.
+            return MacroFileKind::Expr;
+        }
+    };
+
+    match parent.kind() {
+        MACRO_ITEMS | SOURCE_FILE => MacroFileKind::Items,
+        LET_STMT => {
+            // FIXME: Handle Pattern
+            MacroFileKind::Expr
+        }
+        EXPR_STMT => MacroFileKind::Statements,
+        BLOCK => MacroFileKind::Statements,
+        ARG_LIST => MacroFileKind::Expr,
+        TRY_EXPR => MacroFileKind::Expr,
+        _ => {
+            // Unknown , Just guess it is `Items`
+            MacroFileKind::Items
+        }
+    }
 }

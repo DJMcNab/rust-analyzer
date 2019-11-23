@@ -48,14 +48,14 @@ impl FunctionSignature {
 
     pub(crate) fn from_hir(db: &db::RootDatabase, function: hir::Function) -> Self {
         let doc = function.docs(db);
-        let ast_node = function.source(db).ast;
+        let ast_node = function.source(db).value;
         FunctionSignature::from(&ast_node).with_doc_opt(doc)
     }
 
     pub(crate) fn from_struct(db: &db::RootDatabase, st: hir::Struct) -> Option<Self> {
-        let node: ast::StructDef = st.source(db).ast;
+        let node: ast::StructDef = st.source(db).value;
         match node.kind() {
-            ast::StructKind::Named(_) => return None,
+            ast::StructKind::Record(_) => return None,
             _ => (),
         };
 
@@ -87,9 +87,9 @@ impl FunctionSignature {
         db: &db::RootDatabase,
         variant: hir::EnumVariant,
     ) -> Option<Self> {
-        let node: ast::EnumVariant = variant.source(db).ast;
+        let node: ast::EnumVariant = variant.source(db).value;
         match node.kind() {
-            ast::StructKind::Named(_) | ast::StructKind::Unit => return None,
+            ast::StructKind::Record(_) | ast::StructKind::Unit => return None,
             _ => (),
         };
 
@@ -126,7 +126,7 @@ impl FunctionSignature {
     }
 
     pub(crate) fn from_macro(db: &db::RootDatabase, macro_def: hir::MacroDef) -> Option<Self> {
-        let node: ast::MacroDef = macro_def.source(db).ast;
+        let node: ast::MacroDef = macro_def.source(db).value;
 
         let params = vec![];
 

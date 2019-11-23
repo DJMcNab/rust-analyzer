@@ -5,11 +5,13 @@
 
 use std::iter::successors;
 
+use hir_def::{lang_item::LangItemTarget, resolver::Resolver};
 use hir_expand::name;
 use log::{info, warn};
 
+use crate::{db::HirDatabase, Trait};
+
 use super::{traits::Solution, Canonical, Substs, Ty, TypeWalk};
-use crate::{db::HirDatabase, generics::HasGenericParams, Resolver};
 
 const AUTODEREF_RECURSION_LIMIT: usize = 10;
 
@@ -39,13 +41,13 @@ fn deref_by_trait(
     ty: &Canonical<Ty>,
 ) -> Option<Canonical<Ty>> {
     let krate = resolver.krate()?;
-    let deref_trait = match db.lang_item(krate, "deref".into())? {
-        crate::lang_item::LangItemTarget::Trait(t) => t,
+    let deref_trait = match db.lang_item(krate.into(), "deref".into())? {
+        LangItemTarget::TraitId(t) => Trait::from(t),
         _ => return None,
     };
     let target = deref_trait.associated_type_by_name(db, &name::TARGET_TYPE)?;
 
-    let generic_params = target.generic_params(db);
+    let generic_params = db.generic_params(target.id.into());
     if generic_params.count_params_including_parent() != 1 {
         // the Target type + Deref trait should only have one generic parameter,
         // namely Deref's Self type
@@ -71,7 +73,7 @@ fn deref_by_trait(
 
     let canonical = super::Canonical { num_vars: 1 + ty.num_vars, value: in_env };
 
-    let solution = db.trait_solve(krate, canonical)?;
+    let solution = db.trait_solve(krate.into(), canonical)?;
 
     match &solution {
         Solution::Unique(vars) => {

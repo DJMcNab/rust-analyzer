@@ -16,7 +16,12 @@ use ra_syntax::{
 };
 use test_utils::tested_by;
 
-use crate::{attr::Attr, db::DefDatabase2, path::Path, FileAstId, HirFileId, ModuleSource, Source};
+use crate::{
+    attr::{Attr, Attrs},
+    db::DefDatabase2,
+    path::Path,
+    FileAstId, HirFileId, ModuleSource, Source,
+};
 
 /// `RawItems` is a set of top-level items in a file (except for impls).
 ///
@@ -129,19 +134,10 @@ impl Index<Impl> for RawItems {
     }
 }
 
-// Avoid heap allocation on items without attributes.
-type Attrs = Option<Arc<[Attr]>>;
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(super) struct RawItem {
-    attrs: Attrs,
+    pub(super) attrs: Attrs,
     pub(super) kind: RawItemKind,
-}
-
-impl RawItem {
-    pub(super) fn attrs(&self) -> &[Attr] {
-        self.attrs.as_ref().map_or(&[], |it| &*it)
-    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -327,7 +323,7 @@ impl RawItemsCollector {
 
         let mut buf = Vec::new();
         Path::expand_use_item(
-            Source { ast: use_item, file_id: self.file_id },
+            Source { value: use_item, file_id: self.file_id },
             &self.hygiene,
             |path, use_tree, is_glob, alias| {
                 let import_data = ImportData {
