@@ -9,14 +9,14 @@ use crate::{
 use crate::quote;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BuiltinExpander {
+pub enum BuiltinFnLikeExpander {
     Column,
     File,
     Line,
     Stringify,
 }
 
-impl BuiltinExpander {
+impl BuiltinFnLikeExpander {
     pub fn expand(
         &self,
         db: &dyn AstDatabase,
@@ -24,10 +24,10 @@ impl BuiltinExpander {
         tt: &tt::Subtree,
     ) -> Result<tt::Subtree, mbe::ExpandError> {
         match self {
-            BuiltinExpander::Column => column_expand(db, id, tt),
-            BuiltinExpander::File => file_expand(db, id, tt),
-            BuiltinExpander::Line => line_expand(db, id, tt),
-            BuiltinExpander::Stringify => stringify_expand(db, id, tt),
+            BuiltinFnLikeExpander::Column => column_expand(db, id, tt),
+            BuiltinFnLikeExpander::File => file_expand(db, id, tt),
+            BuiltinFnLikeExpander::Line => line_expand(db, id, tt),
+            BuiltinFnLikeExpander::Stringify => stringify_expand(db, id, tt),
         }
     }
 }
@@ -39,13 +39,21 @@ pub fn find_builtin_macro(
 ) -> Option<MacroDefId> {
     // FIXME: Better registering method
     if ident == &name::COLUMN_MACRO {
-        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinExpander::Column) })
+        Some(MacroDefId {
+            krate,
+            ast_id,
+            kind: MacroDefKind::BuiltIn(BuiltinFnLikeExpander::Column),
+        })
     } else if ident == &name::FILE_MACRO {
-        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinExpander::File) })
+        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinFnLikeExpander::File) })
     } else if ident == &name::LINE_MACRO {
-        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinExpander::Line) })
+        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinFnLikeExpander::Line) })
     } else if ident == &name::STRINGIFY_MACRO {
-        Some(MacroDefId { krate, ast_id, kind: MacroDefKind::BuiltIn(BuiltinExpander::Stringify) })
+        Some(MacroDefId {
+            krate,
+            ast_id,
+            kind: MacroDefKind::BuiltIn(BuiltinFnLikeExpander::Stringify),
+        })
     } else {
         None
     }
